@@ -12,7 +12,14 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["bridge.js"]
+      "js": ["bridge.js"],
+      "css": ["overlay.css"]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["overlay.css"],
+      "matches": ["<all_urls>"]
     }
   ]
 }
