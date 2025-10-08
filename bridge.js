@@ -4,7 +4,8 @@ let lastTarget = null;
 let popup = null;
 let overlayWrapper = null;
 let currentIndicator = null;
-let suggestionCache = new Map(); // Map to store original text -> suggestion pairs
+let suggestionCache = new Map(); // Map to store suggestion -> original text pairs (for looking up what to replace)
+let acceptedSuggestions = new Set(); // Set to store accepted suggestions that shouldn't be re-suggested
 
 // Inject CSS
 const link = document.createElement('link');
@@ -77,113 +78,49 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
     e.preventDefault();
     e.stopPropagation();
 
-    // Get current text from target
-    let currentContent = '';
+    console.log('Suggestion to insert:', suggestion);
+    console.log('Target tag:', target.tagName);
+    console.log('Is contentEditable:', target.isContentEditable);
+
+    // Simply replace all content with the suggestion
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-      currentContent = target.value;
+      console.log('Setting value on input/textarea');
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      nativeInputValueSetter.call(target, suggestion);
+      target.setSelectionRange(suggestion.length, suggestion.length);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      target.focus();
     } else if (target.isContentEditable) {
-      currentContent = target.innerText || target.textContent;
+      console.log('Setting content on contentEditable with execCommand');
+
+      // Select all content and replace with suggestion
+      target.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+
+      // Select all content
+      range.selectNodeContents(target);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      // Replace with suggestion
+      const success = document.execCommand('insertText', false, suggestion);
+      console.log('execCommand insertText returned:', success);
+
+      // Verify what happened
+      setTimeout(() => {
+        const newContent = target.innerText || target.textContent;
+        console.log('Content after replacement:', newContent);
+      }, 10);
     }
 
-    console.log('Current content:', currentContent);
-    console.log('Original text:', originalText);
-    console.log('Suggestion:', suggestion);
-    console.log('Content includes original?', currentContent.includes(originalText));
+    // Add to accepted suggestions cache
+    acceptedSuggestions.add(suggestion);
+    console.log('Added to accepted suggestions:', suggestion);
 
-    // Replace text
-    if (currentContent && currentContent.includes(originalText)) {
-      console.log('Replacing text...');
-      const oldTextIndex = currentContent.indexOf(originalText);
-      const beforeReplacement = currentContent.substring(0, oldTextIndex);
-      const afterReplacement = currentContent.substring(oldTextIndex + originalText.length);
-      const newContent = beforeReplacement + suggestion + afterReplacement;
-      const cursorPosition = beforeReplacement.length + suggestion.length;
-
-      console.log('New content:', newContent);
-      console.log('Cursor position:', cursorPosition);
-      console.log('Target tag:', target.tagName);
-      console.log('Is contentEditable:', target.isContentEditable);
-
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-        console.log('Setting value on input/textarea');
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-        nativeInputValueSetter.call(target, newContent);
-        target.setSelectionRange(cursorPosition, cursorPosition);
-        target.dispatchEvent(new Event('input', { bubbles: true }));
-        target.focus();
-      } else if (target.isContentEditable) {
-        console.log('Setting content on contentEditable with execCommand');
-
-        // Look up the actual original text from the cache using the suggestion
-        const actualOriginalText = suggestionCache.get(suggestion);
-        console.log('Looking up suggestion in cache:', suggestion);
-        console.log('Found original text:', actualOriginalText);
-
-        const textToReplace = actualOriginalText || originalText;
-        console.log('Will search for and replace:', textToReplace);
-
-        // Find and select only the text to replace
-        target.focus();
-        const selection = window.getSelection();
-        const range = document.createRange();
-
-        // Walk through text nodes to find the text to replace
-        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
-        let found = false;
-        let node;
-        let nodeCount = 0;
-
-        while (node = walker.nextNode()) {
-          nodeCount++;
-          const nodeText = node.nodeValue;
-          console.log(`Text node ${nodeCount}:`, nodeText);
-          const index = nodeText.indexOf(textToReplace);
-          console.log(`Looking for "${textToReplace}" in node, found at index:`, index);
-
-          if (index !== -1) {
-            // Found the text, select just this portion
-            try {
-              range.setStart(node, index);
-              range.setEnd(node, index + textToReplace.length);
-              selection.removeAllRanges();
-              selection.addRange(range);
-              found = true;
-              console.log('Found and selected text to replace at index', index, 'in node', nodeCount);
-              console.log('Selected text:', selection.toString());
-              break;
-            } catch (e) {
-              console.log('Error selecting text:', e);
-            }
-          }
-        }
-
-        console.log('Total text nodes searched:', nodeCount);
-        console.log('Found text to replace:', found);
-
-        if (found) {
-          console.log('About to replace selection with:', suggestion);
-
-          // insertText should replace the current selection
-          const success = document.execCommand('insertText', false, suggestion);
-          console.log('execCommand insertText returned:', success);
-
-          // Verify what happened
-          setTimeout(() => {
-            const newContent = target.innerText || target.textContent;
-            console.log('Content after replacement:', newContent);
-          }, 10);
-
-          // Clean up cache entry
-          suggestionCache.delete(suggestion);
-        } else {
-          console.log('Could not find text to replace in text nodes');
-        }
-      }
-
-      console.log('Text replacement complete');
-    } else {
-      console.log('Could not replace - content does not include original text or content is empty');
-    }
+    // Clean up cache entry
+    suggestionCache.delete(suggestion);
+    console.log('Text replacement complete');
 
     // Hide popup and indicator
     console.log('Hiding popup and indicator');
@@ -389,8 +326,15 @@ function createOverlayForContentEditable(target, originalText, suggestion) {
 
     const currentContent = getTextFromElement(target);
 
-    // If content is empty (e.g., switched to new tab/textarea), clean up
+    // If content is empty (e.g., message sent, deleted, or cut), clean up and clear caches
     if (!currentContent || currentContent.trim() === '') {
+      console.log('Text box is empty, clearing caches');
+
+      // Clear all caches
+      suggestionCache.clear();
+      acceptedSuggestions.clear();
+      console.log('Caches cleared');
+
       if (currentPopup) {
         currentPopup.classList.remove('visible');
       }
@@ -455,19 +399,50 @@ function getTextFromElement(element) {
   return '';
 }
 
+// Function to remove accepted suggestions from text before sending to LLM
+function removeAcceptedSuggestions(text) {
+  let filteredText = text;
+
+  // Remove each accepted suggestion from the text
+  for (const acceptedSuggestion of acceptedSuggestions) {
+    // Use a more careful replacement to avoid partial matches
+    if (filteredText.includes(acceptedSuggestion)) {
+      filteredText = filteredText.replace(acceptedSuggestion, '');
+    }
+  }
+
+  // Trim whitespace
+  filteredText = filteredText.trim();
+
+  console.log('Original text:', text);
+  console.log('After removing accepted suggestions:', filteredText);
+  console.log('Accepted suggestions:', Array.from(acceptedSuggestions));
+
+  return filteredText;
+}
+
 // Function to call Claude API for idiomatic phrasing via background script
 async function getIdiomaticPhrasing(chineseText, target) {
+  // Filter out accepted suggestions
+  const filteredText = removeAcceptedSuggestions(chineseText);
+
+  // If nothing left after filtering, don't make API call
+  if (!filteredText || !containsChinese(filteredText)) {
+    console.log('No new Chinese text to suggest after filtering');
+    return;
+  }
+
   try {
     chrome.runtime.sendMessage(
-      { action: 'getIdiomaticPhrasing', chineseText: chineseText },
+      { action: 'getIdiomaticPhrasing', chineseText: filteredText },
       (response) => {
         if (response && response.success) {
-          // Cache the original text -> suggestion mapping
-          suggestionCache.set(response.text, chineseText);
-          console.log('Cached mapping:', chineseText, '->', response.text);
+          // Cache the filtered text -> suggestion mapping
+          suggestionCache.set(response.text, filteredText);
+          console.log('Cached mapping:', filteredText, '->', response.text);
 
           // Always use the contentEditable overlay approach
-          createOverlayForContentEditable(target, chineseText, response.text);
+          createOverlayForContentEditable(target, filteredText, response.text);
         }
       }
     );

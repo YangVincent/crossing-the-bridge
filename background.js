@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         max_tokens: 1024,
         messages: [{
           role: 'user',
-          content: `Please provide a more idiomatic and natural phrasing for this Chinese text: "${request.chineseText}". Only respond with the improved Chinese text, nothing else.`
+          content: `Please provide a more idiomatic and natural phrasing for this text: "${request.chineseText}". The text may contain both Chinese and English. If there are English words mixed in, translate them to Chinese if appropriate. Only respond with the improved text, nothing else.`
         }]
       })
     })
