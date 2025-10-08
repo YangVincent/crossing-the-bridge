@@ -22,13 +22,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     })
     .then(response => response.json())
     .then(data => {
-      console.log('API Response:', data);
       if (data.content && data.content[0] && data.content[0].text) {
         sendResponse({ success: true, text: data.content[0].text });
       } else if (data.error) {
         sendResponse({ success: false, error: data.error.message || JSON.stringify(data.error) });
       } else {
-        sendResponse({ success: false, error: 'Unexpected response format: ' + JSON.stringify(data) });
+        sendResponse({ success: false, error: 'Unexpected response format' });
       }
     })
     .catch(error => {

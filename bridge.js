@@ -4,6 +4,7 @@ let lastTarget = null;
 let popup = null;
 let overlayWrapper = null;
 let currentIndicator = null;
+let suggestionCache = new Map(); // Map to store original text -> suggestion pairs
 
 // Inject CSS
 const link = document.createElement('link');
@@ -27,8 +28,7 @@ function createPopup() {
 }
 
 // Show popup with suggestion
-function showPopup(target, originalText, suggestion, textWidth, textLeft) {
-  console.log('showPopup called with:', { target, originalText, suggestion, textWidth, textLeft });
+function showPopup(target, originalText, suggestion, textWidth, textLeft, indicator) {
   const popup = createPopup();
   const suggestionEl = popup.querySelector('.bridge-popup-suggestion');
   const originalEl = popup.querySelector('.bridge-popup-original');
@@ -38,7 +38,6 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft) {
 
   // Position popup above the target
   const rect = target.getBoundingClientRect();
-  console.log('Target rect:', rect);
 
   // Make popup visible first to get its dimensions
   popup.classList.add('visible');
@@ -56,8 +55,6 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft) {
     popup.style.left = `${left}px`;
     popup.style.top = `${top}px`;
     popup.style.position = 'fixed';
-
-    console.log('Popup positioned at:', { left, top, popupHeight, textCenterX });
   }, 0);
 
   // Store reference for updating position
@@ -74,6 +71,140 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft) {
     popup.style.top = `${top}px`;
   };
 
+  // Left click: Accept the suggestion
+  popup.addEventListener('click', (e) => {
+    console.log('Popup clicked!');
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Get current text from target
+    let currentContent = '';
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      currentContent = target.value;
+    } else if (target.isContentEditable) {
+      currentContent = target.innerText || target.textContent;
+    }
+
+    console.log('Current content:', currentContent);
+    console.log('Original text:', originalText);
+    console.log('Suggestion:', suggestion);
+    console.log('Content includes original?', currentContent.includes(originalText));
+
+    // Replace text
+    if (currentContent && currentContent.includes(originalText)) {
+      console.log('Replacing text...');
+      const oldTextIndex = currentContent.indexOf(originalText);
+      const beforeReplacement = currentContent.substring(0, oldTextIndex);
+      const afterReplacement = currentContent.substring(oldTextIndex + originalText.length);
+      const newContent = beforeReplacement + suggestion + afterReplacement;
+      const cursorPosition = beforeReplacement.length + suggestion.length;
+
+      console.log('New content:', newContent);
+      console.log('Cursor position:', cursorPosition);
+      console.log('Target tag:', target.tagName);
+      console.log('Is contentEditable:', target.isContentEditable);
+
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+        console.log('Setting value on input/textarea');
+        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        nativeInputValueSetter.call(target, newContent);
+        target.setSelectionRange(cursorPosition, cursorPosition);
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+        target.focus();
+      } else if (target.isContentEditable) {
+        console.log('Setting content on contentEditable with execCommand');
+
+        // Look up the actual original text from the cache using the suggestion
+        const actualOriginalText = suggestionCache.get(suggestion);
+        console.log('Looking up suggestion in cache:', suggestion);
+        console.log('Found original text:', actualOriginalText);
+
+        const textToReplace = actualOriginalText || originalText;
+        console.log('Will search for and replace:', textToReplace);
+
+        // Find and select only the text to replace
+        target.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+
+        // Walk through text nodes to find the text to replace
+        const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+        let found = false;
+        let node;
+        let nodeCount = 0;
+
+        while (node = walker.nextNode()) {
+          nodeCount++;
+          const nodeText = node.nodeValue;
+          console.log(`Text node ${nodeCount}:`, nodeText);
+          const index = nodeText.indexOf(textToReplace);
+          console.log(`Looking for "${textToReplace}" in node, found at index:`, index);
+
+          if (index !== -1) {
+            // Found the text, select just this portion
+            try {
+              range.setStart(node, index);
+              range.setEnd(node, index + textToReplace.length);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              found = true;
+              console.log('Found and selected text to replace at index', index, 'in node', nodeCount);
+              console.log('Selected text:', selection.toString());
+              break;
+            } catch (e) {
+              console.log('Error selecting text:', e);
+            }
+          }
+        }
+
+        console.log('Total text nodes searched:', nodeCount);
+        console.log('Found text to replace:', found);
+
+        if (found) {
+          console.log('About to replace selection with:', suggestion);
+
+          // insertText should replace the current selection
+          const success = document.execCommand('insertText', false, suggestion);
+          console.log('execCommand insertText returned:', success);
+
+          // Verify what happened
+          setTimeout(() => {
+            const newContent = target.innerText || target.textContent;
+            console.log('Content after replacement:', newContent);
+          }, 10);
+
+          // Clean up cache entry
+          suggestionCache.delete(suggestion);
+        } else {
+          console.log('Could not find text to replace in text nodes');
+        }
+      }
+
+      console.log('Text replacement complete');
+    } else {
+      console.log('Could not replace - content does not include original text or content is empty');
+    }
+
+    // Hide popup and indicator
+    console.log('Hiding popup and indicator');
+    popup.classList.remove('visible');
+    if (indicator && indicator.parentNode) {
+      indicator.remove();
+    }
+  });
+
+  // Right click: Dismiss the popup
+  popup.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // Hide popup and indicator
+    popup.classList.remove('visible');
+    if (indicator && indicator.parentNode) {
+      indicator.remove();
+    }
+  });
+
   // Hide popup when clicking outside
   const hidePopup = (e) => {
     if (!popup.contains(e.target)) {
@@ -88,8 +219,6 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft) {
 
 // Create overlay wrapper for contentEditable elements
 function createOverlayForContentEditable(target, originalText, suggestion) {
-  console.log('Creating overlay for contentEditable', originalText, suggestion);
-
   // Remove any existing indicator
   if (currentIndicator) {
     currentIndicator.remove();
@@ -105,6 +234,75 @@ function createOverlayForContentEditable(target, originalText, suggestion) {
     return context.measureText(text).width;
   };
 
+  // Function to replace text in contentEditable
+  const replaceText = (oldText, newText) => {
+    const currentContent = getTextFromElement(target);
+
+    if (!currentContent.includes(oldText)) {
+      return false;
+    }
+
+    const oldTextIndex = currentContent.indexOf(oldText);
+    const beforeReplacement = currentContent.substring(0, oldTextIndex);
+    const afterReplacement = currentContent.substring(oldTextIndex + oldText.length);
+    const newContent = beforeReplacement + newText + afterReplacement;
+
+    // Calculate cursor position: everything before + new text length
+    const cursorPosition = beforeReplacement.length + newText.length;
+
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      target.value = newContent;
+      // Set cursor to end of replaced text
+      target.setSelectionRange(cursorPosition, cursorPosition);
+      target.focus();
+    } else if (target.isContentEditable) {
+      // For contentEditable, replace the entire content and set cursor
+      target.textContent = newContent;
+
+      // Set cursor to end of replaced text
+      const range = document.createRange();
+      const sel = window.getSelection();
+
+      // Walk through text nodes to find the right position
+      const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT);
+      let currentPos = 0;
+      let targetNode = null;
+      let offsetInNode = 0;
+
+      let node;
+      while (node = walker.nextNode()) {
+        const nodeLength = node.nodeValue.length;
+        if (currentPos + nodeLength >= cursorPosition) {
+          targetNode = node;
+          offsetInNode = cursorPosition - currentPos;
+          break;
+        }
+        currentPos += nodeLength;
+      }
+
+      if (targetNode) {
+        try {
+          range.setStart(targetNode, Math.min(offsetInNode, targetNode.nodeValue.length));
+          range.collapse(true);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          target.focus();
+        } catch (e) {
+          // Fallback: set cursor at the end
+          range.selectNodeContents(target);
+          range.collapse(false);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          target.focus();
+        }
+      }
+    }
+
+    // Trigger input event so other listeners know the content changed
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    return true;
+  };
+
   const textWidth = measureText(originalText, target);
   const rect = target.getBoundingClientRect();
 
@@ -118,23 +316,30 @@ function createOverlayForContentEditable(target, originalText, suggestion) {
   indicator.style.position = 'fixed'; // Use fixed instead of absolute for better positioning
   indicator.style.left = `${rect.left + paddingLeft}px`;
   indicator.style.top = `${rect.bottom - 5}px`;
-  indicator.style.width = `${textWidth}px`;
+  indicator.style.width = '0px'; // Start with 0 width for animation
   indicator.style.height = '3px'; // Thinner underline
   indicator.style.backgroundColor = '#1a73e8';
   indicator.style.cursor = 'pointer';
   indicator.style.zIndex = '999999';
   indicator.style.pointerEvents = 'auto';
+  indicator.style.borderRadius = '2px'; // Round the edges
+  indicator.style.transition = 'width 0.1s ease-out'; // Smooth animation
   indicator.dataset.suggestion = suggestion;
   indicator.dataset.original = originalText;
   indicator.title = 'Click to see suggestion'; // Add tooltip
 
-  console.log('Indicator created at:', { left: rect.left + paddingLeft, top: rect.bottom - 5, width: textWidth });
-
   document.body.appendChild(indicator);
   currentIndicator = indicator;
 
+  // Trigger animation by setting width after a tiny delay
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      indicator.style.width = `${textWidth}px`;
+    });
+  });
+
   // Show popup immediately when overlay is created
-  const currentPopup = showPopup(target, originalText, suggestion, textWidth, rect.left + paddingLeft);
+  const currentPopup = showPopup(target, originalText, suggestion, textWidth, rect.left + paddingLeft, indicator);
 
   // Update indicator position and size on scroll/resize
   const updateIndicatorPosition = () => {
@@ -159,30 +364,72 @@ function createOverlayForContentEditable(target, originalText, suggestion) {
   window.addEventListener('resize', updateIndicatorPosition);
 
   // Monitor text changes to update or hide popup
-  const checkTextChanges = () => {
-    const currentContent = getTextFromElement(target);
+  const cleanupListeners = () => {
+    target.removeEventListener('input', checkTextChanges);
+    target.removeEventListener('keyup', checkTextChanges);
+    window.removeEventListener('scroll', updateIndicatorPosition, true);
+    window.removeEventListener('resize', updateIndicatorPosition);
+  };
 
-    // If the original text is no longer in the content, hide everything
-    if (!currentContent.includes(originalText)) {
-      console.log('Original text removed, hiding popup and indicator');
+  const checkTextChanges = () => {
+    // Check if target still exists and is connected to the DOM
+    if (!target.isConnected || !document.contains(target)) {
       if (currentPopup) {
         currentPopup.classList.remove('visible');
       }
-      if (indicator.parentNode) {
+      if (indicator && indicator.parentNode) {
         indicator.remove();
+      }
+      if (currentIndicator === indicator) {
         currentIndicator = null;
       }
-      target.removeEventListener('input', checkTextChanges);
-      window.removeEventListener('scroll', updateIndicatorPosition, true);
-      window.removeEventListener('resize', updateIndicatorPosition);
+      cleanupListeners();
+      return;
+    }
+
+    const currentContent = getTextFromElement(target);
+
+    // If content is empty (e.g., switched to new tab/textarea), clean up
+    if (!currentContent || currentContent.trim() === '') {
+      if (currentPopup) {
+        currentPopup.classList.remove('visible');
+      }
+      if (indicator && indicator.parentNode) {
+        indicator.remove();
+      }
+      if (currentIndicator === indicator) {
+        currentIndicator = null;
+      }
+      cleanupListeners();
+      return;
+    }
+
+    // If the original text is no longer in the content, hide everything
+    if (!currentContent.includes(originalText)) {
+      if (currentPopup) {
+        currentPopup.classList.remove('visible');
+      }
+      if (indicator && indicator.parentNode) {
+        indicator.remove();
+      }
+      if (currentIndicator === indicator) {
+        currentIndicator = null;
+      }
+      cleanupListeners();
     }
   };
 
   target.addEventListener('input', checkTextChanges);
 
+  // Also listen for keyup to catch select-all + delete scenarios
+  target.addEventListener('keyup', checkTextChanges);
+
+  // Listen for cut/paste events
+  target.addEventListener('cut', () => setTimeout(checkTextChanges, 0));
+  target.addEventListener('paste', () => setTimeout(checkTextChanges, 0));
+
   // Show popup when clicking the indicator or the input
   const showSuggestion = (e) => {
-    console.log('showSuggestion clicked!');
     e.preventDefault();
     e.stopPropagation();
     if (currentPopup && currentPopup.classList) {
@@ -210,30 +457,22 @@ function getTextFromElement(element) {
 
 // Function to call Claude API for idiomatic phrasing via background script
 async function getIdiomaticPhrasing(chineseText, target) {
-  console.log('Getting idiomatic phrasing for:', chineseText);
   try {
     chrome.runtime.sendMessage(
       { action: 'getIdiomaticPhrasing', chineseText: chineseText },
       (response) => {
-        console.log('API response received:', response);
         if (response && response.success) {
-          console.log('More idiomatic phrasing:', response.text);
-          // Show the suggestion in the overlay
-          if (target.isContentEditable) {
-            console.log('Target is contentEditable, creating overlay');
-            createOverlayForContentEditable(target, chineseText, response.text);
-          } else {
-            // For regular input/textarea, show popup near the input
-            console.log('Target is regular input, showing popup');
-            showPopup(target, chineseText, response.text);
-          }
-        } else {
-          console.error('Error calling Claude API:', response ? response.error : 'No response');
+          // Cache the original text -> suggestion mapping
+          suggestionCache.set(response.text, chineseText);
+          console.log('Cached mapping:', chineseText, '->', response.text);
+
+          // Always use the contentEditable overlay approach
+          createOverlayForContentEditable(target, chineseText, response.text);
         }
       }
     );
   } catch (error) {
-    console.error('Error sending message to background script:', error);
+    // Silent error handling
   }
 }
 
@@ -258,14 +497,11 @@ document.addEventListener('keydown', (event) => {
     // Get current text from the input field
     setTimeout(() => {
       currentText = getTextFromElement(target);
-      console.log('Current text:', currentText, 'Contains Chinese:', containsChinese(currentText));
 
       // Check if text contains Chinese
       if (containsChinese(currentText)) {
-        console.log('Chinese detected, setting debounce timer');
         // Set debounce timer for 0.5 seconds
         debounceTimer = setTimeout(() => {
-          console.log('Debounce complete, calling API');
           getIdiomaticPhrasing(currentText, target);
         }, 500);
       }
