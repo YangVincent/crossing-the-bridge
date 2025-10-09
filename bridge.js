@@ -434,7 +434,7 @@ async function getIdiomaticPhrasing(chineseText, target) {
 
   try {
     chrome.runtime.sendMessage(
-      { action: 'getIdiomaticPhrasing', chineseText: filteredText },
+      { action: 'getIdiomaticPhrasingLocal', chineseText: filteredText },
       (response) => {
         if (response && response.success) {
           // Cache the filtered text -> suggestion mapping

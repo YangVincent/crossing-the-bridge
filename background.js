@@ -2,6 +2,51 @@
 importScripts('config.js');
 
 // --- 1️⃣ Local LLM (Gemini Nano) helper functions ---
+async function downloadModel() {
+  if (typeof LanguageModel === "undefined") {
+    throw new Error("LanguageModel API not available in this browser");
+  }
+
+  try {
+    const availability = await LanguageModel.availability();
+    console.log("Model availability status:", availability);
+
+    if (availability === "available") {
+      console.log("Model already available");
+      return true;
+    }
+
+    if (availability === "downloading") {
+      console.log("Model is already downloading, waiting...");
+      // Model is already downloading, we'll create a session to wait for it
+    }
+
+    if (availability === "downloadable" || availability === "downloading") {
+      console.log("Starting model download...");
+
+      // Create session with download progress monitoring
+      const session = await LanguageModel.create({
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            const progress = Math.round(e.loaded * 100);
+            console.log(`Model download progress: ${progress}%`);
+          });
+        }
+      });
+
+      console.log("Model download complete and session created");
+      await session.destroy(); // Clean up the session
+      return true;
+    }
+
+    // Status is "unavailable" or other
+    throw new Error(`Model is unavailable. Status: ${availability}`);
+  } catch (e) {
+    console.error("Error downloading model:", e);
+    throw e;
+  }
+}
+
 async function ensureModelAvailable() {
   if (typeof LanguageModel === "undefined") {
     console.warn("LanguageModel API not available in this browser");
@@ -16,20 +61,53 @@ async function ensureModelAvailable() {
   }
 }
 
-async function rephraseChinese(text, hint = "自然、礼貌的改写") {
-  if (!await ensureModelAvailable()) {
-    throw new Error("Local LLM not available. Try updating Chrome.");
+// Reuse a single session for better performance
+let modelSession = null;
+
+async function getOrCreateSession() {
+  if (!modelSession) {
+    if (!await ensureModelAvailable()) {
+      throw new Error("Local LLM not available. Try updating Chrome.");
+    }
+    // Create session with optimized parameters for faster responses
+    modelSession = await LanguageModel.create({
+      temperature: 0.7, // Lower temperature for more focused/faster responses
+      topK: 3 // Reduce topK for faster sampling
+    });
   }
-
-  const session = await LanguageModel.create();
-  const prompt = `请你自然地改写以下中文，使其更通顺和地道，不改变原意。
-文本: ${text}`;
-
-  const response = await session.prompt({ prompt });
-  return response.output_text || response.output || "（无输出）";
+  return modelSession;
 }
 
-// --- 2️⃣ Chrome message listener ---
+async function rephraseChinese(text, hint = "自然、礼貌的改写") {
+  const session = await getOrCreateSession();
+
+  // Simplified, more direct prompt for faster processing
+  const prompt = `请提供更自然、地道的改写。如果文本已经很自然、地道，不需要改动，请返回空字符串。只返回改写后的文本，不要其他内容。
+
+文本：${text}`;
+
+  console.log("Prompt being sent to Gemini Nano:", prompt);
+
+  const response = await session.prompt(prompt);
+  console.log("Raw response from model:", response);
+  console.log("Response type:", typeof response);
+  console.log("Response keys:", Object.keys(response || {}));
+
+  return response || "（无输出）";
+}
+
+// --- 2️⃣ Download model and create session on startup ---
+downloadModel()
+  .then(async () => {
+    console.log("Creating model session...");
+    modelSession = await LanguageModel.create();
+    console.log("Model session ready");
+  })
+  .catch(err => {
+    console.error("Failed to initialize model on startup:", err);
+  });
+
+// --- 3️⃣ Chrome message listener ---
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // a) Local rephrasing (Gemini Nano)
   if (request.action === "getIdiomaticPhrasingLocal") {
