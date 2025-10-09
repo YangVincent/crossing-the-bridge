@@ -457,7 +457,7 @@ document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTextInput =
     target.tagName === 'INPUT' &&
-    ['text', 'email', 'password', 'search', 'tel', 'url'].includes(target.type) ||
+    ['text', 'email', 'password', 'search', 'tel', 'url', 'textarea', 'div'].includes(target.type) ||
     target.tagName === 'TEXTAREA' ||
     target.isContentEditable;
 
