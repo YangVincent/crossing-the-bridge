@@ -1,0 +1,24 @@
+body {
+  width: 250px;
+  font-family: sans-serif;
+  padding: 10px;
+}
+
+textarea {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+button {
+  width: 100%;
+  padding: 6px;
+  background: #0077ff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+}
+
+#result {
+  margin-top: 10px;
+  white-space: pre-wrap;
+}
