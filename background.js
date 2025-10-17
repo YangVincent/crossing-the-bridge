@@ -82,9 +82,19 @@ async function rephraseChinese(text, hint = "自然、礼貌的改写") {
   const session = await getOrCreateSession();
 
   // Simplified, more direct prompt for faster processing
-  const prompt = `请提供更自然、地道的改写。如果文本已经很自然、地道，不需要改动，请返回空字符串。只返回改写后的文本，不要其他内容。
+  /*const prompt = `请提供更自然、地道的改写。如果文本已经很自然、地道，不需要改动，请返回空字符串。只返回改写后的文本，不要其他内容。
 
-文本：${text}`;
+文本：${text}`;*/
+  
+  const prompt = `You are a chinese teacher suggesting idiomatic phrasings. 
+  First, classify whether the text is long enough to need rephrasing. If not, return
+  an empty string. Then, determine if the sentence is something a native speaker might say.
+  If so, return an empty string. Finally, only if the sentence is quite wrong, or if the sentence contains english, 
+  translate the entire sentence into idiomatic chinese. 
+  RETURN ONLY ONE RESPONSE.
+  DO NOT return anything other than the rephrased text.
+  DO NOT include explanations or your thinking.
+  This is the message: ${text}`;
 
   console.log("Prompt being sent to Gemini Nano:", prompt);
 
