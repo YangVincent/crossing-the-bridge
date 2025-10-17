@@ -85,7 +85,9 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
     // Simply replace all content with the suggestion
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
       console.log('Setting value on input/textarea');
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      const nativeInputValueSetter = target.tagName === 'TEXTAREA' 
+        ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+        : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
       nativeInputValueSetter.call(target, suggestion);
       target.setSelectionRange(suggestion.length, suggestion.length);
       target.dispatchEvent(new Event('input', { bubbles: true }));
@@ -429,6 +431,11 @@ async function getIdiomaticPhrasing(chineseText, target) {
   // If nothing left after filtering, don't make API call
   if (!filteredText || !containsChinese(filteredText)) {
     console.log('No new Chinese text to suggest after filtering');
+    return;
+  }
+
+  if (filteredText.length < 4) {
+    console.log('Chinese text too short, skipping API call');
     return;
   }
 

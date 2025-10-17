@@ -1,0 +1,20 @@
+.bridge-icon {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	width: 56px;
+	height: 56px;
+	z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bridge-icon img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+	background: rgba(0, 0, 0, 0.06); /* subtle backdrop to reveal the white SVG */
+	border-radius: 8px;
+	box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.08);
+}

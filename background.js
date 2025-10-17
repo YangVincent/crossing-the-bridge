@@ -86,15 +86,15 @@ async function rephraseChinese(text, hint = "自然、礼貌的改写") {
 
 文本：${text}`;*/
   
-  const prompt = `You are a chinese teacher suggesting idiomatic phrasings. 
-  First, classify whether the text is long enough to need rephrasing. If not, return
-  an empty string. Then, determine if the sentence is something a native speaker might say.
-  If so, return an empty string. Finally, only if the sentence is quite wrong, or if the sentence contains english, 
-  translate the entire sentence into idiomatic chinese. 
-  RETURN ONLY ONE RESPONSE.
-  DO NOT return anything other than the rephrased text.
-  DO NOT include explanations or your thinking.
-  This is the message: ${text}`;
+  const prompt = `你是一位汉语老师，正在建议使用惯用语。
+  首先，判断文本是否足够长，需要改写。如果不是，则返回
+  一个空字符串。然后，判断文本是否自然、地道。
+  如果是，则返回一个空字符串。最后，只有当句子完全错误，或者句子包含英语时，
+  才将整个句子翻译成惯用的汉语。
+  只返回一个答案。
+  除了改写的文本外，不要返回任何其他内容。
+  不要包含解释或你的想法。
+  消息如下： ${text}`;
 
   console.log("Prompt being sent to Gemini Nano:", prompt);
 
@@ -121,6 +121,7 @@ downloadModel()
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // a) Local rephrasing (Gemini Nano)
   if (request.action === "getIdiomaticPhrasingLocal") {
+    
     rephraseChinese(request.chineseText)
       .then(result => sendResponse({ success: true, text: result }))
       .catch(err => sendResponse({ success: false, error: err.message }));
