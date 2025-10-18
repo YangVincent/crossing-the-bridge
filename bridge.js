@@ -7,12 +7,97 @@ let currentIndicator = null;
 let workingIndicator = null; // Indicator showing the extension is processing
 let suggestionCache = new Map(); // Map to store suggestion -> original text pairs (for looking up what to replace)
 let acceptedSuggestions = new Set(); // Set to store accepted suggestions that shouldn't be re-suggested
+let sentenceCache = new Map(); // Cache for sentence -> {suggestion, usefulness} results
+let activeProcessingId = null; // Track current processing session to cancel outdated requests
 
 // Inject CSS
 const link = document.createElement('link');
 link.rel = 'stylesheet';
 link.href = chrome.runtime.getURL('overlay.css');
 document.head.appendChild(link);
+
+// Chunking functions
+
+// Count words in a string (works for both Chinese and English)
+function countWords(text) {
+  // Remove leading/trailing whitespace
+  text = text.trim();
+  if (!text) return 0;
+  
+  // Count Chinese characters as individual words
+  const chineseChars = text.match(/[\u4e00-\u9fff]/g);
+  const chineseCount = chineseChars ? chineseChars.length : 0;
+  
+  // Count English words (sequences of non-Chinese, non-whitespace characters)
+  const englishWords = text.replace(/[\u4e00-\u9fff]/g, ' ').match(/\S+/g);
+  const englishCount = englishWords ? englishWords.length : 0;
+  
+  return chineseCount + englishCount;
+}
+
+// Split text into sentences by period (both Chinese 。 and English .)
+function splitIntoSentences(text) {
+  if (!text || text.trim().length === 0) return [];
+  
+  // Split by both English period and Chinese period while preserving punctuation
+  // Regex capture group /([。\.])/ includes periods in the result
+  // This creates an alternating array: [text, period, text, period, ...]
+  // e.g., "Hello. 你好。" → ["Hello", ".", " 你好", "。", ""]
+  // Then reduce processes only even indices (text parts), attaching the next period to each
+  const sentences = text.split(/([。\.])/).reduce((acc, part, index, array) => {
+    if (index % 2 === 0 && part.trim()) {
+      // Process even indices (0, 2, 4...) which are the text parts
+      const period = array[index + 1] || ''; // Get the following period (odd index)
+      acc.push((part + period).trim()); // Combine text + period
+    }
+    return acc;
+  }, []);
+  
+  return sentences.filter(s => s.length > 0);
+}
+
+// Filter and process text for LLM
+// Returns an array of sentences that need processing
+function filterAndChunkText(text) {
+  // Check minimum word count
+  const wordCount = countWords(text);
+  if (wordCount < 4) {
+    console.log(`Text too short (${wordCount} words), skipping`);
+    return [];
+  }
+  
+  // Split into sentences
+  const sentences = splitIntoSentences(text);
+  console.log('Split into sentences:', sentences);
+  
+  // Filter out sentences that are already in cache or accepted
+  const sentencesToProcess = sentences.filter(sentence => {
+    const trimmedSentence = sentence.trim();
+    
+    // Skip if already processed and cached
+    if (sentenceCache.has(trimmedSentence)) {
+      console.log('Sentence already cached:', trimmedSentence);
+      return false;
+    }
+    
+    // Skip if it's an accepted suggestion
+    if (acceptedSuggestions.has(trimmedSentence)) {
+      console.log('Sentence already accepted:', trimmedSentence);
+      return false;
+    }
+    
+    // Skip if not enough words
+    if (countWords(trimmedSentence) < 4) {
+      console.log('Sentence too short:', trimmedSentence);
+      return false;
+    }
+    
+    return true;
+  });
+  
+  console.log('Sentences to process:', sentencesToProcess);
+  return sentencesToProcess;
+}
 
 // Show working indicator to the right of the input field
 function showWorkingIndicator(target) {
@@ -479,8 +564,75 @@ function removeAcceptedSuggestions(text) {
   return filteredText;
 }
 
+// Clean up cache entries that are substrings of completed sentences
+function cleanupCacheForCompletedSentences(text) {
+  const completedSentences = splitIntoSentences(text);
+  let removedCount = 0;
+  
+  completedSentences.forEach(sentence => {
+    // Remove cache entries where the key is a substring of this sentence
+    for (const [cachedKey, cachedValue] of sentenceCache.entries()) {
+      if (sentence.includes(cachedKey) && cachedKey !== sentence) {
+        sentenceCache.delete(cachedKey);
+        removedCount++;
+        console.log('Removed substring cache entry:', cachedKey, 'from sentence:', sentence);
+      }
+    }
+  });
+  
+  if (removedCount > 0) {
+    console.log(`Cleaned up ${removedCount} substring cache entries`);
+  }
+}
+
+// Function to process a single sentence and get idiomatic suggestion
+async function processSentence(sentence, target, processingId) {
+  return new Promise((resolve) => {
+    // Check if already in cache
+    if (sentenceCache.has(sentence)) {
+      console.log('Using cached result for:', sentence);
+      resolve(sentenceCache.get(sentence));
+      return;
+    }
+
+    // Make API call for this sentence
+    chrome.runtime.sendMessage(
+      { action: 'getIdiomaticPhrasingLocal', chineseText: sentence },
+      (response) => {
+        // Check if this processing session has been cancelled
+        if (processingId !== activeProcessingId) {
+          console.log('Discarding outdated response for:', sentence);
+          resolve(null);
+          return;
+        }
+
+        if (response && response.success) {
+          const result = {
+            suggestion: response.text,
+            usefulness: response.semanticDifference,
+            originalSentence: sentence
+          };
+          
+          // Cache the result
+          sentenceCache.set(sentence, result);
+          console.log('Cached sentence result:', sentence, '->', result);
+          
+          resolve(result);
+        } else {
+          resolve(null);
+        }
+      }
+    );
+  });
+}
+
 // Function to call Claude API for idiomatic phrasing via background script
 async function getIdiomaticPhrasing(chineseText, target) {
+  // Generate a unique ID for this processing session
+  const processingId = Date.now();
+  activeProcessingId = processingId;
+  console.log('Starting processing session:', processingId);
+
   // Filter out accepted suggestions
   const filteredText = removeAcceptedSuggestions(chineseText);
 
@@ -490,8 +642,14 @@ async function getIdiomaticPhrasing(chineseText, target) {
     return;
   }
 
-  if (filteredText.length < 4) {
-    console.log('Chinese text too short, skipping API call');
+  // Clean up cache for completed sentences
+  cleanupCacheForCompletedSentences(chineseText);
+
+  // Use chunking to filter and split text
+  const sentencesToProcess = filterAndChunkText(filteredText);
+  
+  if (sentencesToProcess.length === 0) {
+    console.log('No sentences to process after filtering');
     return;
   }
 
@@ -499,33 +657,65 @@ async function getIdiomaticPhrasing(chineseText, target) {
   showWorkingIndicator(target);
 
   try {
-    chrome.runtime.sendMessage(
-      { action: 'getIdiomaticPhrasingLocal', chineseText: filteredText },
-      (response) => {
-        // Hide working indicator when response is received
-        hideWorkingIndicator();
-
-        if (response && response.success) {
-          console.log('Semantic difference score:', response.semanticDifference);
-          
-          // Only show popup if semantic difference is > 0.5
-          if (response.semanticDifference > 0.5) {
-            // Cache the filtered text -> suggestion mapping
-            suggestionCache.set(response.text, filteredText);
-            console.log('Cached mapping:', filteredText, '->', response.text);
-
-            // Always use the contentEditable overlay approach
-            createOverlayForContentEditable(target, filteredText, response.text, response.semanticDifference);
-          } else {
-            console.log('Semantic difference too small, not showing suggestion');
-          }
-        }
-      }
+    // Process each sentence with the processing ID
+    const results = await Promise.all(
+      sentencesToProcess.map(sentence => processSentence(sentence, target, processingId))
     );
+
+    // Check if this session is still active
+    if (processingId !== activeProcessingId) {
+      console.log('Processing session cancelled:', processingId);
+      hideWorkingIndicator();
+      return;
+    }
+
+    // Hide working indicator when all processing is complete
+    hideWorkingIndicator();
+
+    // Combine all useful suggestions into one complete text
+    const usefulResults = results.filter(result => result && result.usefulness > 0.5);
+    
+    if (usefulResults.length === 0) {
+      console.log('No useful suggestions found');
+      return;
+    }
+
+    console.log(`Found ${usefulResults.length} useful suggestions, combining...`);
+
+    // Reconstruct the full text with improvements
+    let combinedOriginal = filteredText;
+    let combinedSuggestion = filteredText;
+    let maxUsefulness = 0;
+
+    // Replace each original sentence with its suggestion in the combined text
+    usefulResults.forEach(result => {
+      console.log('Processing useful result:', result);
+      
+      // Replace the original sentence with the suggestion
+      combinedSuggestion = combinedSuggestion.replace(result.originalSentence, result.suggestion);
+      
+      // Track the highest usefulness score
+      maxUsefulness = Math.max(maxUsefulness, result.usefulness);
+      
+      // Cache individual mappings
+      suggestionCache.set(result.suggestion, result.originalSentence);
+    });
+
+    console.log('Combined original:', combinedOriginal);
+    console.log('Combined suggestion:', combinedSuggestion);
+    console.log('Max usefulness:', maxUsefulness);
+
+    // Show one overlay for the entire combined suggestion
+    if (combinedSuggestion !== combinedOriginal) {
+      createOverlayForContentEditable(target, combinedOriginal, combinedSuggestion, maxUsefulness);
+    } else {
+      console.log('Combined suggestion identical to original, not showing');
+    }
+
   } catch (error) {
     // Hide working indicator on error
     hideWorkingIndicator();
-    // Silent error handling
+    console.error('Error processing sentences:', error);
   }
 }
 
@@ -553,10 +743,10 @@ document.addEventListener('keydown', (event) => {
 
       // Check if text contains Chinese
       if (containsChinese(currentText)) {
-        // Set debounce timer for 0.5 seconds
+        // Set debounce timer for 1 second (increased from 0.5s to reduce lag)
         debounceTimer = setTimeout(() => {
           getIdiomaticPhrasing(currentText, target);
-        }, 500);
+        }, 1000);
       }
     }, 0);
   }
