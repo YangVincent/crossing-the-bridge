@@ -103,7 +103,46 @@ async function rephraseChinese(text, hint = "自然、礼貌的改写") {
   console.log("Response type:", typeof response);
   console.log("Response keys:", Object.keys(response || {}));
 
-  return response || "（无输出）";
+  const suggestion = response || "（无输出）";
+  
+  // If we got a suggestion, rate the usefulness
+  let semanticDifference = 0;
+  if (suggestion && suggestion !== "（无输出）" && suggestion.trim() !== "") {
+    const ratingPrompt = `你是一位汉语老师，正在帮助学习中文的学生。评估以下建议的有用性。
+
+一个有用的建议应该：
+1. 保留原句的意思
+2. 在措辞上提供有意义的改进
+3. 与原句有明显不同
+
+用0到1之间的数字评分，其中：
+1 表示非常有用（意思相同，措辞明显更好）
+0 表示没有用（意思不同、改进不明显）
+
+重要：如果建议与原句相似或完全一样，必须评分为 0（没有用）。
+
+只返回一个数字（例如：0.7），不要解释。
+
+原句：${text}
+建议：${suggestion}`;
+
+    console.log("Usefulness rating prompt:", ratingPrompt);
+    
+    const ratingResponse = await session.prompt(ratingPrompt);
+    console.log("Raw rating response:", ratingResponse);
+    
+    // Extract the number from the response
+    const match = ratingResponse.match(/([0-9]*\.?[0-9]+)/);
+    if (match) {
+      semanticDifference = parseFloat(match[1]);
+      // Clamp to 0-1 range
+      semanticDifference = Math.max(0, Math.min(1, semanticDifference));
+    }
+    
+    console.log("Usefulness score:", semanticDifference);
+  }
+
+  return { text: suggestion, semanticDifference };
 }
 
 // --- 2️⃣ Download model and create session on startup ---
@@ -123,7 +162,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "getIdiomaticPhrasingLocal") {
     
     rephraseChinese(request.chineseText)
-      .then(result => sendResponse({ success: true, text: result }))
+      .then(result => sendResponse({ 
+        success: true, 
+        text: result.text,
+        semanticDifference: result.semanticDifference 
+      }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true; //
   }

@@ -29,13 +29,19 @@ function createPopup() {
 }
 
 // Show popup with suggestion
-function showPopup(target, originalText, suggestion, textWidth, textLeft, indicator) {
+function showPopup(target, originalText, suggestion, textWidth, textLeft, indicator, semanticDifference = 0) {
   const popup = createPopup();
   const suggestionEl = popup.querySelector('.bridge-popup-suggestion');
   const originalEl = popup.querySelector('.bridge-popup-original');
 
   suggestionEl.textContent = suggestion;
-  originalEl.textContent = `Original: ${originalText}`;
+  
+  // Include semantic difference in the original text display if available
+  if (semanticDifference > 0) {
+    originalEl.textContent = `Original: ${originalText} (Difference: ${(semanticDifference * 100).toFixed(0)}%)`;
+  } else {
+    originalEl.textContent = `Original: ${originalText}`;
+  }
 
   // Position popup above the target
   const rect = target.getBoundingClientRect();
@@ -157,12 +163,14 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
 }
 
 // Create overlay wrapper for contentEditable elements
-function createOverlayForContentEditable(target, originalText, suggestion) {
+function createOverlayForContentEditable(target, originalText, suggestion, semanticDifference = 0) {
   // Remove any existing indicator
   if (currentIndicator) {
     currentIndicator.remove();
     currentIndicator = null;
   }
+
+  console.log(`Creating overlay - Semantic difference: ${semanticDifference}`);
 
   // Calculate the width of the actual text
   const measureText = (text, element) => {
@@ -278,7 +286,7 @@ function createOverlayForContentEditable(target, originalText, suggestion) {
   });
 
   // Show popup immediately when overlay is created
-  const currentPopup = showPopup(target, originalText, suggestion, textWidth, rect.left + paddingLeft, indicator);
+  const currentPopup = showPopup(target, originalText, suggestion, textWidth, rect.left + paddingLeft, indicator, semanticDifference);
 
   // Update indicator position and size on scroll/resize
   const updateIndicatorPosition = () => {
@@ -444,12 +452,19 @@ async function getIdiomaticPhrasing(chineseText, target) {
       { action: 'getIdiomaticPhrasingLocal', chineseText: filteredText },
       (response) => {
         if (response && response.success) {
-          // Cache the filtered text -> suggestion mapping
-          suggestionCache.set(response.text, filteredText);
-          console.log('Cached mapping:', filteredText, '->', response.text);
+          console.log('Semantic difference score:', response.semanticDifference);
+          
+          // Only show popup if semantic difference is > 0.5
+          if (response.semanticDifference > 0.5) {
+            // Cache the filtered text -> suggestion mapping
+            suggestionCache.set(response.text, filteredText);
+            console.log('Cached mapping:', filteredText, '->', response.text);
 
-          // Always use the contentEditable overlay approach
-          createOverlayForContentEditable(target, filteredText, response.text);
+            // Always use the contentEditable overlay approach
+            createOverlayForContentEditable(target, filteredText, response.text, response.semanticDifference);
+          } else {
+            console.log('Semantic difference too small, not showing suggestion');
+          }
         }
       }
     );
