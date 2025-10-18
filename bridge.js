@@ -4,6 +4,7 @@ let lastTarget = null;
 let popup = null;
 let overlayWrapper = null;
 let currentIndicator = null;
+let workingIndicator = null; // Indicator showing the extension is processing
 let suggestionCache = new Map(); // Map to store suggestion -> original text pairs (for looking up what to replace)
 let acceptedSuggestions = new Set(); // Set to store accepted suggestions that shouldn't be re-suggested
 
@@ -12,6 +13,53 @@ const link = document.createElement('link');
 link.rel = 'stylesheet';
 link.href = chrome.runtime.getURL('overlay.css');
 document.head.appendChild(link);
+
+// Show working indicator to the right of the input field
+function showWorkingIndicator(target) {
+  // Remove any existing working indicator
+  if (workingIndicator) {
+    workingIndicator.remove();
+  }
+
+  const rect = target.getBoundingClientRect();
+  workingIndicator = document.createElement('div');
+  workingIndicator.className = 'bridge-working-indicator';
+  
+  // Position to the right of the input field
+  workingIndicator.style.position = 'fixed';
+  workingIndicator.style.left = `${rect.right + 8}px`;
+  workingIndicator.style.top = `${rect.top + (rect.height / 2) - 10}px`;
+  
+  document.body.appendChild(workingIndicator);
+
+  // Update position on scroll/resize
+  const updatePosition = () => {
+    if (!workingIndicator || !workingIndicator.parentNode) return;
+    const newRect = target.getBoundingClientRect();
+    workingIndicator.style.left = `${newRect.right + 8}px`;
+    workingIndicator.style.top = `${newRect.top + (newRect.height / 2) - 10}px`;
+  };
+
+  window.addEventListener('scroll', updatePosition, true);
+  window.addEventListener('resize', updatePosition);
+
+  // Store cleanup function
+  workingIndicator._cleanup = () => {
+    window.removeEventListener('scroll', updatePosition, true);
+    window.removeEventListener('resize', updatePosition);
+  };
+}
+
+// Hide working indicator
+function hideWorkingIndicator() {
+  if (workingIndicator) {
+    if (workingIndicator._cleanup) {
+      workingIndicator._cleanup();
+    }
+    workingIndicator.remove();
+    workingIndicator = null;
+  }
+}
 
 // Create popup element
 function createPopup() {
@@ -447,10 +495,16 @@ async function getIdiomaticPhrasing(chineseText, target) {
     return;
   }
 
+  // Show working indicator
+  showWorkingIndicator(target);
+
   try {
     chrome.runtime.sendMessage(
       { action: 'getIdiomaticPhrasingLocal', chineseText: filteredText },
       (response) => {
+        // Hide working indicator when response is received
+        hideWorkingIndicator();
+
         if (response && response.success) {
           console.log('Semantic difference score:', response.semanticDifference);
           
@@ -469,6 +523,8 @@ async function getIdiomaticPhrasing(chineseText, target) {
       }
     );
   } catch (error) {
+    // Hide working indicator on error
+    hideWorkingIndicator();
     // Silent error handling
   }
 }

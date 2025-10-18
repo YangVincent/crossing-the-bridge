@@ -55,3 +55,34 @@
   border-bottom: 1px solid #e0e0e0;
   transform: translateX(-50%) rotate(45deg);
 }
+
+/* Working indicator icon */
+.bridge-working-indicator {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #1a73e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999999;
+  pointer-events: none;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.bridge-working-indicator::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 2px solid white;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: bridge-spin 0.6s linear infinite;
+}
+
+@keyframes bridge-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
