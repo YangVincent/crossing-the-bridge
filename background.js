@@ -165,15 +165,39 @@ downloadModel()
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // a) Local rephrasing (Gemini Nano)
   if (request.action === "getIdiomaticPhrasingLocal") {
-    
+
     rephraseChinese(request.chineseText)
-      .then(result => sendResponse({ 
-        success: true, 
+      .then(result => sendResponse({
+        success: true,
         text: result.text,
-        semanticDifference: result.semanticDifference 
+        semanticDifference: result.semanticDifference
       }))
       .catch(err => sendResponse({ success: false, error: err.message }));
     return true; //
+  }
+
+  // c) Local summarization (Gemini Nano)
+  if (request.action === "summarizeWithLocalLLM") {
+    console.log('Received summarizeWithLocalLLM request');
+    console.log('Text length:', request.chineseText?.length);
+
+    getOrCreateSession()
+      .then(session => {
+        console.log('Session created, prompting...');
+        return session.prompt(request.chineseText);
+      })
+      .then(result => {
+        console.log('Got result from LLM:', result?.substring(0, 100));
+        sendResponse({
+          success: true,
+          text: result
+        });
+      })
+      .catch(err => {
+        console.error('Error in summarization:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
   }
 
   // b) Cloud rephrasing (Anthropic Claude)

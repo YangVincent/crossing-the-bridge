@@ -19,10 +19,15 @@
     "128": "assets/logo.png"
   },
   "options_page": "settings.html",
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
   "permissions": [
     "storage",
     "activeTab",
-    "tabs"
+    "tabs",
+    "sidePanel",
+    "scripting"
   ],
   "background": {
     "service_worker": "background.js"
