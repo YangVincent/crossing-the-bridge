@@ -1,5 +1,4 @@
 // Background service worker to handle API calls
-importScripts('config.js');
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -181,7 +180,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'getIdiomaticPhrasing') {
     // Get API key from storage
     chrome.storage.sync.get(['anthropicApiKey'], async (result) => {
-      const apiKey = result.anthropicApiKey || CONFIG.ANTHROPIC_API_KEY;
+      const apiKey = result.anthropicApiKey;
 
       if (!apiKey) {
         sendResponse({ success: false, error: 'API key not configured. Please set it in the extension settings.' });
