@@ -1,9 +1,15 @@
 // Popup script for extension popup
 
-// Open side panel
+// Open summary panel (in-page overlay)
 document.getElementById('open-sidepanel').addEventListener('click', async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  await chrome.sidePanel.open({ tabId: tab.id });
+
+  chrome.tabs.sendMessage(tab.id, { action: 'showSummaryPanel' }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error:', chrome.runtime.lastError.message);
+    }
+  });
+
   window.close();
 });
 

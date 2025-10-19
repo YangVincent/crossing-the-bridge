@@ -954,4 +954,250 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     });
     return true; // Keep message channel open
   }
+
+  // Show summary panel
+  if (request.action === 'showSummaryPanel') {
+    showSummaryPanel();
+    sendResponse({ success: true });
+    return true;
+  }
 });
+
+// ===== SUMMARY PANEL =====
+let summaryPanel = null;
+let isDragging = false;
+let dragOffset = { x: 0, y: 0 };
+
+function createSummaryPanel() {
+  if (summaryPanel) return summaryPanel;
+
+  const panel = document.createElement('div');
+  panel.className = 'bridge-summary-panel';
+  panel.innerHTML = `
+    <div class="bridge-panel-header" id="bridge-panel-header">
+      <div class="bridge-panel-title">
+        <img src="${chrome.runtime.getURL('assets/logo.png')}" class="bridge-panel-logo" alt="Logo">
+        <span>Page Summary</span>
+      </div>
+      <div class="bridge-panel-controls">
+        <button class="bridge-panel-btn" id="bridge-minimize-btn" title="Close">×</button>
+      </div>
+    </div>
+    <div class="bridge-panel-content">
+      <div class="bridge-panel-controls-section">
+        <div class="bridge-hsk-selector">
+          <label>HSK Level:</label>
+          <select id="bridge-hsk-select">
+            <option value="1">HSK 1</option>
+            <option value="2">HSK 2</option>
+            <option value="3">HSK 3</option>
+            <option value="4">HSK 4</option>
+            <option value="5" selected>HSK 5</option>
+            <option value="6">HSK 6</option>
+          </select>
+        </div>
+        <button class="bridge-summarize-btn" id="bridge-summarize-now-btn">Summarize This Page</button>
+      </div>
+      <div class="bridge-panel-status" id="bridge-panel-status"></div>
+      <div class="bridge-panel-loading" id="bridge-panel-loading">
+        <img src="${chrome.runtime.getURL('assets/logo.png')}" class="bridge-loading-spinner" alt="Loading">
+        <div>Analyzing and summarizing...</div>
+      </div>
+      <div class="bridge-panel-result" id="bridge-panel-result">
+        <div class="bridge-result-header">
+          <span class="bridge-result-badge" id="bridge-result-badge">HSK 5</span>
+          <button class="bridge-copy-btn" id="bridge-copy-result-btn">Copy</button>
+        </div>
+        <div class="bridge-result-text" id="bridge-result-text"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+  summaryPanel = panel;
+
+  // Set up dragging - only on the title area, not the whole header
+  const headerTitle = panel.querySelector('.bridge-panel-title');
+  headerTitle.addEventListener('mousedown', startDrag);
+
+  // Close button
+  panel.querySelector('#bridge-minimize-btn').addEventListener('click', () => {
+    panel.classList.remove('visible');
+  });
+
+  // Summarize button
+  panel.querySelector('#bridge-summarize-now-btn').addEventListener('click', handleSummarize);
+
+  // Copy button
+  panel.querySelector('#bridge-copy-result-btn').addEventListener('click', handleCopy);
+
+  return panel;
+}
+
+function startDrag(e) {
+  // Don't start drag if clicking on interactive elements
+  if (e.target.closest('.bridge-panel-btn') ||
+      e.target.closest('select') ||
+      e.target.closest('button') ||
+      e.target.closest('.bridge-panel-content')) {
+    return;
+  }
+
+  isDragging = true;
+  const rect = summaryPanel.getBoundingClientRect();
+  dragOffset.x = e.clientX - rect.left;
+  dragOffset.y = e.clientY - rect.top;
+
+  document.addEventListener('mousemove', drag);
+  document.addEventListener('mouseup', stopDrag);
+  e.preventDefault();
+}
+
+function drag(e) {
+  if (!isDragging) return;
+
+  const x = e.clientX - dragOffset.x;
+  const y = e.clientY - dragOffset.y;
+
+  summaryPanel.style.left = `${x}px`;
+  summaryPanel.style.top = `${y}px`;
+  summaryPanel.style.right = 'auto';
+}
+
+function stopDrag() {
+  isDragging = false;
+  document.removeEventListener('mousemove', drag);
+  document.removeEventListener('mouseup', stopDrag);
+}
+
+async function handleSummarize() {
+  const btn = summaryPanel.querySelector('#bridge-summarize-now-btn');
+  const status = summaryPanel.querySelector('#bridge-panel-status');
+  const loading = summaryPanel.querySelector('#bridge-panel-loading');
+  const result = summaryPanel.querySelector('#bridge-panel-result');
+  const hskLevel = summaryPanel.querySelector('#bridge-hsk-select').value;
+
+  try {
+    btn.disabled = true;
+    status.classList.remove('visible');
+    result.classList.remove('visible');
+    loading.classList.add('visible');
+
+    // Extract Chinese text from page
+    const chineseText = extractChineseFromPage();
+
+    if (!chineseText || chineseText.trim().length === 0) {
+      throw new Error('No Chinese text found on this page');
+    }
+
+    // Limit text length
+    const maxLength = 3000;
+    const textToSummarize = chineseText.length > maxLength
+      ? chineseText.substring(0, maxLength) + '...'
+      : chineseText;
+
+    // Get summary
+    const summary = await getSummary(textToSummarize, hskLevel);
+
+    // Display result
+    loading.classList.remove('visible');
+    result.classList.add('visible');
+    summaryPanel.querySelector('#bridge-result-text').textContent = summary;
+    summaryPanel.querySelector('#bridge-result-badge').textContent = `HSK ${hskLevel}`;
+
+  } catch (error) {
+    console.error('Summarization error:', error);
+    loading.classList.remove('visible');
+    status.textContent = error.message;
+    status.className = 'bridge-panel-status visible error';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function extractChineseFromPage() {
+  function containsChinese(text) {
+    return /[\u4e00-\u9fff]/.test(text);
+  }
+
+  const body = document.body.innerText || document.body.textContent;
+  const paragraphs = body
+    .split('\n')
+    .map(p => p.trim())
+    .filter(p => p.length > 0 && containsChinese(p));
+
+  return paragraphs.join('\n\n');
+}
+
+async function getSummary(text, hskLevel) {
+  const settings = await chrome.storage.sync.get(['selectedModel']);
+  const selectedModel = settings.selectedModel || 'local';
+
+  const hskDescriptions = {
+    1: 'HSK 1 (150个基础词汇)',
+    2: 'HSK 2 (300个词汇)',
+    3: 'HSK 3 (600个词汇)',
+    4: 'HSK 4 (1200个词汇)',
+    5: 'HSK 5 (2500个词汇)',
+    6: 'HSK 6 (5000+个词汇)'
+  };
+
+  const prompt = `Summarize the following Chinese text using only ${hskDescriptions[hskLevel]} vocabulary. Keep it concise (about 1/4 of original length) and use simple sentences.
+
+Text to summarize:
+${text}
+
+Summary:`;
+
+  const action = selectedModel === 'cloud' ? 'getIdiomaticPhrasing' : 'summarizeWithLocalLLM';
+
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(
+      { action: action, chineseText: prompt, hskLevel: hskLevel },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+
+        if (response && response.success) {
+          let summary = response.text;
+
+          // Clean up response
+          const summaryMarker = 'Summary:';
+          const markerIndex = summary.lastIndexOf(summaryMarker);
+          if (markerIndex !== -1) {
+            summary = summary.substring(markerIndex + summaryMarker.length).trim();
+          }
+
+          summary = summary.replace(/^["'"\s]+|["'"\s]+$/g, '').trim();
+          resolve(summary);
+        } else {
+          reject(new Error(response?.error || 'Failed to generate summary'));
+        }
+      }
+    );
+  });
+}
+
+function handleCopy() {
+  const text = summaryPanel.querySelector('#bridge-result-text').textContent;
+  const btn = summaryPanel.querySelector('#bridge-copy-result-btn');
+
+  navigator.clipboard.writeText(text).then(() => {
+    const originalText = btn.textContent;
+    btn.textContent = '✓ Copied';
+    btn.style.color = '#1e8e3e';
+    setTimeout(() => {
+      btn.textContent = originalText;
+      btn.style.color = '';
+    }, 2000);
+  }).catch(err => {
+    console.error('Failed to copy:', err);
+  });
+}
+
+function showSummaryPanel() {
+  const panel = createSummaryPanel();
+  panel.classList.add('visible');
+}
