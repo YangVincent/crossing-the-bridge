@@ -4,7 +4,19 @@
   "version": "1.0",
   "manifest_version": 3,
   "action": {
-    "default_popup": "bridge.html"
+    "default_popup": "bridge.html",
+    "default_icon": {
+      "16": "assets/logo.png",
+      "32": "assets/logo.png",
+      "48": "assets/logo.png",
+      "128": "assets/logo.png"
+    }
+  },
+  "icons": {
+    "16": "assets/logo.png",
+    "32": "assets/logo.png",
+    "48": "assets/logo.png",
+    "128": "assets/logo.png"
   },
   "options_page": "settings.html",
   "permissions": [
