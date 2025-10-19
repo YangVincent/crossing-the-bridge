@@ -152,13 +152,20 @@ function showWorkingIndicator(target) {
   workingIndicator = document.createElement('div');
   workingIndicator.className = 'bridge-working-indicator';
 
+  // Add logo image
+  const logo = document.createElement('img');
+  logo.src = chrome.runtime.getURL('assets/logo.png');
+  logo.alt = 'Loading';
+  workingIndicator.appendChild(logo);
+
   // Position to the right of the input field
   workingIndicator.style.position = 'fixed';
 
   // For inline elements (like span) with no height, use better positioning
   const height = rect.height || 20; // Fallback to 20px if height is 0
+  const indicatorSize = 20; // Size of the indicator
   workingIndicator.style.left = `${rect.right + 8}px`;
-  workingIndicator.style.top = `${rect.top + (height / 2) - 10}px`;
+  workingIndicator.style.top = `${rect.top + (height / 2) - (indicatorSize / 2)}px`;
 
   // Ensure visibility
   workingIndicator.style.display = 'flex';
@@ -170,8 +177,9 @@ function showWorkingIndicator(target) {
     if (!workingIndicator || !workingIndicator.parentNode) return;
     const newRect = target.getBoundingClientRect();
     const newHeight = newRect.height || 20; // Fallback to 20px if height is 0
+    const indicatorSize = 20;
     workingIndicator.style.left = `${newRect.right + 8}px`;
-    workingIndicator.style.top = `${newRect.top + (newHeight / 2) - 10}px`;
+    workingIndicator.style.top = `${newRect.top + (newHeight / 2) - (indicatorSize / 2)}px`;
   };
 
   window.addEventListener('scroll', updatePosition, true);

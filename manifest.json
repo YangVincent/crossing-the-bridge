@@ -36,7 +36,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["overlay.css"],
+      "resources": ["overlay.css", "assets/logo.png"],
       "matches": ["<all_urls>"]
     }
   ]
