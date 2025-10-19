@@ -9,12 +9,52 @@ let suggestionCache = new Map(); // Map to store suggestion -> original text pai
 let acceptedSuggestions = new Set(); // Set to store accepted suggestions that shouldn't be re-suggested
 let sentenceCache = new Map(); // Cache for sentence -> {suggestion, usefulness} results
 let activeProcessingId = null; // Track current processing session to cancel outdated requests
+let extensionEnabled = true; // Track if extension is enabled for this page
 
-// Inject CSS
-const link = document.createElement('link');
-link.rel = 'stylesheet';
-link.href = chrome.runtime.getURL('overlay.css');
-document.head.appendChild(link);
+// Check if extension should be enabled on this page
+async function checkIfEnabled() {
+  const currentUrl = window.location.href;
+  const settings = await chrome.storage.sync.get(['listMode', 'urlPatterns']);
+  const listMode = settings.listMode || 'blocklist';
+  const urlPatterns = settings.urlPatterns || [];
+
+  // If no patterns, use default behavior
+  if (urlPatterns.length === 0) {
+    return listMode === 'blocklist'; // Enabled by default in blocklist mode
+  }
+
+  // Check if URL matches any pattern
+  const matches = urlPatterns.some(pattern => {
+    try {
+      const regex = new RegExp(pattern);
+      return regex.test(currentUrl);
+    } catch (e) {
+      console.error('Invalid regex pattern:', pattern, e);
+      return false;
+    }
+  });
+
+  // In blocklist mode: enabled if URL does NOT match
+  // In allowlist mode: enabled if URL DOES match
+  return listMode === 'blocklist' ? !matches : matches;
+}
+
+// Initialize extension
+(async () => {
+  extensionEnabled = await checkIfEnabled();
+  console.log('Extension enabled:', extensionEnabled);
+
+  if (!extensionEnabled) {
+    console.log('Extension disabled for this page');
+    return;
+  }
+
+  // Inject CSS only if enabled
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = chrome.runtime.getURL('overlay.css');
+  document.head.appendChild(link);
+})();
 
 // Chunking functions
 
@@ -738,6 +778,11 @@ async function getIdiomaticPhrasing(chineseText, target) {
 
 // Listen for keyboard events on input fields
 document.addEventListener('keydown', (event) => {
+  // Skip if extension is disabled
+  if (!extensionEnabled) {
+    return;
+  }
+
   // Check if the event target is a text input element
   const target = event.target;
   const isTextInput =
@@ -766,5 +811,42 @@ document.addEventListener('keydown', (event) => {
         }, 1000);
       }
     }, 0);
+  }
+});
+
+// Listen for messages from popup to disable extension for current page
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'disableForCurrentPage') {
+    const currentUrl = window.location.href;
+    chrome.storage.sync.get(['urlPatterns', 'listMode'], (result) => {
+      const urlPatterns = result.urlPatterns || [];
+      const listMode = result.listMode || 'blocklist';
+
+      // Generate a regex pattern for the current domain
+      const url = new URL(currentUrl);
+      const pattern = `.*${url.hostname.replace(/\./g, '\\.')}.*`;
+
+      // Add to blocklist (if in blocklist mode) or remove from allowlist (if in allowlist mode)
+      if (listMode === 'blocklist') {
+        if (!urlPatterns.includes(pattern)) {
+          urlPatterns.push(pattern);
+        }
+      } else {
+        // In allowlist mode, remove this pattern if it exists
+        const index = urlPatterns.findIndex(p => p === pattern);
+        if (index !== -1) {
+          urlPatterns.splice(index, 1);
+        }
+      }
+
+      // Save updated patterns
+      chrome.storage.sync.set({ urlPatterns }, () => {
+        sendResponse({ success: true, pattern });
+        // Disable extension immediately
+        extensionEnabled = false;
+        console.log('Extension disabled for', url.hostname);
+      });
+    });
+    return true; // Keep message channel open
   }
 });

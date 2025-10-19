@@ -1,12 +1,21 @@
 // Settings page script
 const DEFAULT_MODEL = 'local';
+const DEFAULT_LIST_MODE = 'blocklist';
 
 // Load saved settings when page opens
 document.addEventListener('DOMContentLoaded', async () => {
-  // Load saved model preference
-  const result = await chrome.storage.sync.get(['selectedModel', 'anthropicApiKey']);
+  // Load saved settings
+  const result = await chrome.storage.sync.get([
+    'selectedModel',
+    'anthropicApiKey',
+    'listMode',
+    'urlPatterns'
+  ]);
+
   const selectedModel = result.selectedModel || DEFAULT_MODEL;
   const apiKey = result.anthropicApiKey || '';
+  const listMode = result.listMode || DEFAULT_LIST_MODE;
+  const urlPatterns = result.urlPatterns || [];
 
   // Set the radio button
   const radioButton = document.getElementById(`model-${selectedModel}`);
@@ -24,6 +33,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (selectedModel === 'cloud') {
     document.getElementById('api-key-section').style.display = 'block';
   }
+
+  // Set list mode
+  setListMode(listMode);
+
+  // Render URL patterns
+  renderUrlList(urlPatterns);
 });
 
 // Update visual styles when radio selection changes
@@ -65,6 +80,111 @@ document.querySelectorAll('.radio-option').forEach(option => {
   });
 });
 
+// List mode management
+let currentListMode = DEFAULT_LIST_MODE;
+let currentUrlPatterns = [];
+
+function setListMode(mode) {
+  currentListMode = mode;
+
+  // Update button styles
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    if (btn.dataset.mode === mode) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+
+  // Update descriptions
+  if (mode === 'blocklist') {
+    document.getElementById('blocklist-description').style.display = 'block';
+    document.getElementById('allowlist-description').style.display = 'none';
+  } else {
+    document.getElementById('blocklist-description').style.display = 'none';
+    document.getElementById('allowlist-description').style.display = 'block';
+  }
+}
+
+// Mode button handlers
+document.getElementById('mode-blocklist').addEventListener('click', () => {
+  setListMode('blocklist');
+});
+
+document.getElementById('mode-allowlist').addEventListener('click', () => {
+  setListMode('allowlist');
+});
+
+// Render URL list
+function renderUrlList(patterns) {
+  currentUrlPatterns = patterns || [];
+  const listEl = document.getElementById('url-list');
+
+  if (patterns.length === 0) {
+    listEl.innerHTML = '<div class="empty-list-message">No patterns added yet</div>';
+    return;
+  }
+
+  listEl.innerHTML = patterns.map((pattern, index) => `
+    <div class="url-item">
+      <span class="url-item-text">${escapeHtml(pattern)}</span>
+      <button class="remove-btn" data-index="${index}">Remove</button>
+    </div>
+  `).join('');
+
+  // Add event listeners to remove buttons
+  listEl.querySelectorAll('.remove-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const index = parseInt(btn.dataset.index);
+      removePattern(index);
+    });
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Add pattern
+document.getElementById('add-pattern-btn').addEventListener('click', () => {
+  const input = document.getElementById('url-pattern-input');
+  const pattern = input.value.trim();
+
+  if (!pattern) {
+    return;
+  }
+
+  // Validate regex
+  try {
+    new RegExp(pattern);
+  } catch (e) {
+    alert('Invalid regex pattern: ' + e.message);
+    return;
+  }
+
+  // Add to list if not already present
+  if (!currentUrlPatterns.includes(pattern)) {
+    currentUrlPatterns.push(pattern);
+    renderUrlList(currentUrlPatterns);
+    input.value = '';
+  }
+});
+
+// Allow Enter key to add pattern
+document.getElementById('url-pattern-input').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    document.getElementById('add-pattern-btn').click();
+  }
+});
+
+// Remove pattern
+function removePattern(index) {
+  currentUrlPatterns.splice(index, 1);
+  renderUrlList(currentUrlPatterns);
+}
+
 // Save settings
 document.getElementById('save-button').addEventListener('click', async () => {
   const selectedModel = document.querySelector('input[name="model"]:checked')?.value || DEFAULT_MODEL;
@@ -82,7 +202,9 @@ document.getElementById('save-button').addEventListener('click', async () => {
     // Save to chrome storage
     await chrome.storage.sync.set({
       selectedModel: selectedModel,
-      anthropicApiKey: apiKey
+      anthropicApiKey: apiKey,
+      listMode: currentListMode,
+      urlPatterns: currentUrlPatterns
     });
 
     // Show success message

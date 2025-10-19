@@ -199,12 +199,143 @@
     .save-button:active {
       background-color: #1557b0;
     }
+
+    .url-list-container {
+      margin-top: 12px;
+    }
+
+    .url-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      padding: 8px;
+      background-color: #f8f9fa;
+      margin-bottom: 8px;
+    }
+
+    .url-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      background: white;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      margin-bottom: 4px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    .url-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .url-item-text {
+      flex: 1;
+      word-break: break-all;
+      color: #202124;
+    }
+
+    .remove-btn {
+      background: none;
+      border: none;
+      color: #c5221f;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      margin-left: 8px;
+    }
+
+    .remove-btn:hover {
+      background-color: #fce8e6;
+    }
+
+    .add-url-input {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .add-url-input input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #dadce0;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: monospace;
+    }
+
+    .add-url-input input:focus {
+      outline: none;
+      border-color: #1a73e8;
+      box-shadow: 0 0 0 2px rgba(26, 115, 232, 0.1);
+    }
+
+    .add-url-input button {
+      padding: 8px 16px;
+      background-color: #1a73e8;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .add-url-input button:hover {
+      background-color: #1765cc;
+    }
+
+    .help-text {
+      font-size: 12px;
+      color: #5f6368;
+      margin-top: 8px;
+      line-height: 1.4;
+    }
+
+    .empty-list-message {
+      text-align: center;
+      color: #5f6368;
+      font-size: 13px;
+      padding: 16px;
+    }
+
+    .mode-selector {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .mode-btn {
+      flex: 1;
+      padding: 8px 16px;
+      border: 2px solid #e0e0e0;
+      background: white;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .mode-btn:hover {
+      border-color: #1a73e8;
+    }
+
+    .mode-btn.active {
+      border-color: #1a73e8;
+      background-color: #e8f0fe;
+      color: #1a73e8;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Crossing the Bridge Settings</h1>
-    <p class="subtitle">Choose your AI model for Chinese text suggestions</p>
+    <p class="subtitle">Configure your Chinese text assistance extension</p>
 
     <div class="setting-section">
       <label class="setting-label">Select AI Model</label>
@@ -240,6 +371,44 @@
         <input type="password" id="api-key" placeholder="sk-ant-...">
         <div class="api-key-help">
           Get your API key from <a href="https://console.anthropic.com/settings/keys" target="_blank">Anthropic Console</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="setting-section">
+      <label class="setting-label">Website Control</label>
+
+      <div class="mode-selector">
+        <button class="mode-btn active" id="mode-blocklist" data-mode="blocklist">
+          Blocklist Mode
+        </button>
+        <button class="mode-btn" id="mode-allowlist" data-mode="allowlist">
+          Allowlist Mode
+        </button>
+      </div>
+
+      <div id="blocklist-description" class="help-text" style="margin-bottom: 12px;">
+        Extension works on all websites <strong>except</strong> those listed below.
+      </div>
+      <div id="allowlist-description" class="help-text" style="margin-bottom: 12px; display: none;">
+        Extension <strong>only</strong> works on websites listed below.
+      </div>
+
+      <div class="url-list-container">
+        <div class="url-list" id="url-list">
+          <div class="empty-list-message">No patterns added yet</div>
+        </div>
+
+        <div class="add-url-input">
+          <input type="text" id="url-pattern-input" placeholder="Enter regex pattern (e.g., .*twitter\\.com.*)">
+          <button id="add-pattern-btn">Add Pattern</button>
+        </div>
+
+        <div class="help-text">
+          Add regex patterns to match URLs. Examples:<br>
+          • <code>.*twitter\\.com.*</code> - Matches all Twitter URLs<br>
+          • <code>https://mail\\.google\\.com.*</code> - Matches Gmail<br>
+          • <code>.*\\.facebook\\.com.*</code> - Matches all Facebook domains
         </div>
       </div>
     </div>

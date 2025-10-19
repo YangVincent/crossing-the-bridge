@@ -1,6 +1,106 @@
+<!DOCTYPE html>
 <html>
-  <body>
-    <h1>Crossing the Bridge</h1>
-    <script src="bridge.js"></script>
-  </body>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      width: 300px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0 0 16px 0;
+      color: #202124;
+    }
+
+    .button {
+      width: 100%;
+      padding: 10px 16px;
+      margin-bottom: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      text-align: left;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .button-primary {
+      background-color: #1a73e8;
+      color: white;
+    }
+
+    .button-primary:hover {
+      background-color: #1765cc;
+    }
+
+    .button-secondary {
+      background-color: #f8f9fa;
+      color: #202124;
+      border: 1px solid #dadce0;
+    }
+
+    .button-secondary:hover {
+      background-color: #f1f3f4;
+    }
+
+    .button-danger {
+      background-color: #fce8e6;
+      color: #c5221f;
+      border: 1px solid #f8d7da;
+    }
+
+    .button-danger:hover {
+      background-color: #fad2ce;
+    }
+
+    .status-message {
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-top: 8px;
+      display: none;
+    }
+
+    .status-message.success {
+      background-color: #e8f5e9;
+      color: #1e8e3e;
+      display: block;
+    }
+
+    .status-message.error {
+      background-color: #fce8e6;
+      color: #c5221f;
+      display: block;
+    }
+
+    .icon {
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Crossing the Bridge</h1>
+
+  <button class="button button-primary" id="open-settings">
+    <span class="icon">⚙️</span>
+    <span>Open Settings</span>
+  </button>
+
+  <button class="button button-danger" id="disable-page">
+    <span class="icon">🚫</span>
+    <span>Disable for This Page</span>
+  </button>
+
+  <div class="status-message" id="status-message"></div>
+
+  <script src="popup.js"></script>
+</body>
 </html>
