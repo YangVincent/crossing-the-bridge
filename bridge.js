@@ -10,6 +10,8 @@ let acceptedSuggestions = new Set(); // Set to store accepted suggestions that s
 let sentenceCache = new Map(); // Cache for sentence -> {suggestion, usefulness} results
 let activeProcessingId = null; // Track current processing session to cancel outdated requests
 let extensionEnabled = true; // Track if extension is enabled for this page
+let lastAcceptedSuggestion = null; // Store last accepted suggestion for undo
+let currentSuggestionContext = null; // Store current suggestion context (target, original, suggestion, etc.)
 
 // Check if extension should be enabled on this page
 async function checkIfEnabled() {
@@ -208,6 +210,72 @@ function createPopup() {
   return popup;
 }
 
+// Function to accept a suggestion
+function acceptSuggestion(target, originalText, suggestion, indicator) {
+  console.log('Accepting suggestion:', suggestion);
+  console.log('Target tag:', target.tagName);
+  console.log('Is contentEditable:', target.isContentEditable);
+
+  // Store the original text for undo
+  lastAcceptedSuggestion = {
+    target: target,
+    originalText: originalText,
+    suggestion: suggestion,
+    indicator: indicator
+  };
+
+  // Simply replace all content with the suggestion
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+    console.log('Setting value on input/textarea');
+    const nativeInputValueSetter = target.tagName === 'TEXTAREA'
+      ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+      : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    nativeInputValueSetter.call(target, suggestion);
+    target.setSelectionRange(suggestion.length, suggestion.length);
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    target.focus();
+  } else if (target.isContentEditable) {
+    console.log('Setting content on contentEditable with execCommand');
+
+    // Select all content and replace with suggestion
+    target.focus();
+    const selection = window.getSelection();
+    const range = document.createRange();
+
+    // Select all content
+    range.selectNodeContents(target);
+    selection.removeAllRanges();
+    selection.addRange(range);
+
+    // Replace with suggestion
+    const success = document.execCommand('insertText', false, suggestion);
+    console.log('execCommand insertText returned:', success);
+
+    // Verify what happened
+    setTimeout(() => {
+      const newContent = target.innerText || target.textContent;
+      console.log('Content after replacement:', newContent);
+    }, 10);
+  }
+
+  // Add to accepted suggestions cache
+  acceptedSuggestions.add(suggestion);
+  console.log('Added to accepted suggestions:', suggestion);
+
+  // Clean up cache entry
+  suggestionCache.delete(suggestion);
+  console.log('Text replacement complete');
+
+  // Hide popup and indicator
+  console.log('Hiding popup and indicator');
+  if (popup) {
+    popup.classList.remove('visible');
+  }
+  if (indicator && indicator.parentNode) {
+    indicator.remove();
+  }
+}
+
 // Show popup with suggestion
 function showPopup(target, originalText, suggestion, textWidth, textLeft, indicator, semanticDifference = 0) {
   const popup = createPopup();
@@ -215,13 +283,22 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
   const originalEl = popup.querySelector('.bridge-popup-original');
 
   suggestionEl.textContent = suggestion;
-  
+
   // Include semantic difference in the original text display if available
   if (semanticDifference > 0) {
     originalEl.textContent = `Original: ${originalText} (Difference: ${(semanticDifference * 100).toFixed(0)}%)`;
   } else {
     originalEl.textContent = `Original: ${originalText}`;
   }
+
+  // Store current suggestion context for Tab key
+  currentSuggestionContext = {
+    target: target,
+    originalText: originalText,
+    suggestion: suggestion,
+    indicator: indicator,
+    semanticDifference: semanticDifference
+  };
 
   // Position popup above the target
   const rect = target.getBoundingClientRect();
@@ -264,58 +341,7 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
     e.preventDefault();
     e.stopPropagation();
 
-    console.log('Suggestion to insert:', suggestion);
-    console.log('Target tag:', target.tagName);
-    console.log('Is contentEditable:', target.isContentEditable);
-
-    // Simply replace all content with the suggestion
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-      console.log('Setting value on input/textarea');
-      const nativeInputValueSetter = target.tagName === 'TEXTAREA' 
-        ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
-        : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      nativeInputValueSetter.call(target, suggestion);
-      target.setSelectionRange(suggestion.length, suggestion.length);
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      target.focus();
-    } else if (target.isContentEditable) {
-      console.log('Setting content on contentEditable with execCommand');
-
-      // Select all content and replace with suggestion
-      target.focus();
-      const selection = window.getSelection();
-      const range = document.createRange();
-
-      // Select all content
-      range.selectNodeContents(target);
-      selection.removeAllRanges();
-      selection.addRange(range);
-
-      // Replace with suggestion
-      const success = document.execCommand('insertText', false, suggestion);
-      console.log('execCommand insertText returned:', success);
-
-      // Verify what happened
-      setTimeout(() => {
-        const newContent = target.innerText || target.textContent;
-        console.log('Content after replacement:', newContent);
-      }, 10);
-    }
-
-    // Add to accepted suggestions cache
-    acceptedSuggestions.add(suggestion);
-    console.log('Added to accepted suggestions:', suggestion);
-
-    // Clean up cache entry
-    suggestionCache.delete(suggestion);
-    console.log('Text replacement complete');
-
-    // Hide popup and indicator
-    console.log('Hiding popup and indicator');
-    popup.classList.remove('visible');
-    if (indicator && indicator.parentNode) {
-      indicator.remove();
-    }
+    acceptSuggestion(target, originalText, suggestion, indicator);
   });
 
   // Right click: Dismiss the popup
@@ -523,6 +549,9 @@ function createOverlayForContentEditable(target, originalText, suggestion, seman
       // Clear all caches
       suggestionCache.clear();
       acceptedSuggestions.clear();
+      sentenceCache.clear();
+      lastAcceptedSuggestion = null; // Clear undo state
+      currentSuggestionContext = null; // Clear current suggestion context
       console.log('Caches cleared');
 
       if (currentPopup) {
@@ -783,7 +812,6 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  // Check if the event target is a text input element
   const target = event.target;
   const isTextInput =
     target.tagName === 'INPUT' &&
@@ -791,6 +819,75 @@ document.addEventListener('keydown', (event) => {
     target.tagName === 'TEXTAREA' ||
     target.isContentEditable;
 
+  // Handle Tab key to accept suggestion
+  if (event.key === 'Tab' && !event.shiftKey && isTextInput && currentSuggestionContext && popup && popup.classList.contains('visible')) {
+    event.preventDefault();
+    console.log('Tab pressed - accepting suggestion');
+    acceptSuggestion(
+      currentSuggestionContext.target,
+      currentSuggestionContext.originalText,
+      currentSuggestionContext.suggestion,
+      currentSuggestionContext.indicator
+    );
+    currentSuggestionContext = null;
+    return;
+  }
+
+  // Handle Shift+Tab to undo last acceptance
+  if (event.key === 'Tab' && event.shiftKey && isTextInput && lastAcceptedSuggestion) {
+    event.preventDefault();
+    console.log('Shift+Tab pressed - undoing last acceptance');
+
+    const undo = lastAcceptedSuggestion;
+
+    // Restore original text
+    if (undo.target.tagName === 'INPUT' || undo.target.tagName === 'TEXTAREA') {
+      const nativeInputValueSetter = undo.target.tagName === 'TEXTAREA'
+        ? Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set
+        : Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      nativeInputValueSetter.call(undo.target, undo.originalText);
+      undo.target.setSelectionRange(undo.originalText.length, undo.originalText.length);
+      undo.target.dispatchEvent(new Event('input', { bubbles: true }));
+      undo.target.focus();
+    } else if (undo.target.isContentEditable) {
+      undo.target.focus();
+      const selection = window.getSelection();
+      const range = document.createRange();
+
+      range.selectNodeContents(undo.target);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      document.execCommand('insertText', false, undo.originalText);
+    }
+
+    // Remove from accepted suggestions
+    acceptedSuggestions.delete(undo.suggestion);
+
+    // Re-show the popup with the suggestion
+    const measureText = (text, element) => {
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      const styles = window.getComputedStyle(element);
+      context.font = `${styles.fontSize} ${styles.fontFamily}`;
+      return context.measureText(text).width;
+    };
+
+    const textWidth = measureText(undo.originalText, undo.target);
+    const rect = undo.target.getBoundingClientRect();
+    const styles = window.getComputedStyle(undo.target);
+    const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+
+    // Recreate the overlay
+    createOverlayForContentEditable(undo.target, undo.originalText, undo.suggestion, 0.8);
+
+    // Clear the undo state
+    lastAcceptedSuggestion = null;
+
+    return;
+  }
+
+  // Check if the event target is a text input element
   if (isTextInput) {
     lastTarget = target;
 
