@@ -594,7 +594,7 @@ function cleanupCacheForCompletedSentences(text) {
 
 // Function to process a single sentence and get idiomatic suggestion
 async function processSentence(sentence, target, processingId) {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     // Check if already in cache
     if (sentenceCache.has(sentence)) {
       console.log('Using cached result for:', sentence);
@@ -602,9 +602,18 @@ async function processSentence(sentence, target, processingId) {
       return;
     }
 
+    // Get the selected model from settings
+    const settings = await chrome.storage.sync.get(['selectedModel']);
+    const selectedModel = settings.selectedModel || 'local';
+
+    // Choose the appropriate action based on selected model
+    const action = selectedModel === 'cloud' ? 'getIdiomaticPhrasing' : 'getIdiomaticPhrasingLocal';
+
+    console.log(`Using ${selectedModel} model for translation`);
+
     // Make API call for this sentence
     chrome.runtime.sendMessage(
-      { action: 'getIdiomaticPhrasingLocal', chineseText: sentence },
+      { action: action, chineseText: sentence },
       (response) => {
         // Check if this processing session has been cancelled
         if (processingId !== activeProcessingId) {
@@ -616,16 +625,17 @@ async function processSentence(sentence, target, processingId) {
         if (response && response.success) {
           const result = {
             suggestion: response.text,
-            usefulness: response.semanticDifference,
+            usefulness: response.semanticDifference || 0, // Use the returned score from either model
             originalSentence: sentence
           };
-          
+
           // Cache the result
           sentenceCache.set(sentence, result);
           console.log('Cached sentence result:', sentence, '->', result);
-          
+
           resolve(result);
         } else {
+          console.error('Error from API:', response?.error);
           resolve(null);
         }
       }

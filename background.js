@@ -1,6 +1,12 @@
 // Background service worker to handle API calls
 importScripts('config.js');
 
+// Default settings
+const DEFAULT_SETTINGS = {
+  selectedModel: 'local',
+  anthropicApiKey: ''
+};
+
 // --- 1️⃣ Local LLM (Gemini Nano) helper functions ---
 async function downloadModel() {
   if (typeof LanguageModel === "undefined") {
@@ -171,37 +177,111 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true; //
   }
 
-  // b) Cloud rephrasing (Anthropic Claude)    
+  // b) Cloud rephrasing (Anthropic Claude)
   if (request.action === 'getIdiomaticPhrasing') {
-    fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': CONFIG.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5-20250929',
-        max_tokens: 1024,
-        messages: [{
-          role: 'user',
-          content: `Please provide a more idiomatic and natural phrasing for this text: "${request.chineseText}". The text may contain both Chinese and English. If there are English words mixed in, translate them to Chinese if appropriate. Only respond with the improved text, nothing else.`
-        }]
-      })
-    })
-    .then(response => response.json())
-    .then(data => {
-      if (data.content && data.content[0] && data.content[0].text) {
-        sendResponse({ success: true, text: data.content[0].text });
-      } else if (data.error) {
-        sendResponse({ success: false, error: data.error.message || JSON.stringify(data.error) });
-      } else {
-        sendResponse({ success: false, error: 'Unexpected response format' });
+    // Get API key from storage
+    chrome.storage.sync.get(['anthropicApiKey'], async (result) => {
+      const apiKey = result.anthropicApiKey || CONFIG.ANTHROPIC_API_KEY;
+
+      if (!apiKey) {
+        sendResponse({ success: false, error: 'API key not configured. Please set it in the extension settings.' });
+        return;
       }
-    })
-    .catch(error => {
-      sendResponse({ success: false, error: error.message });
+
+      try {
+        // First API call: Get the suggestion
+        const suggestionResponse = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 1024,
+            messages: [{
+              role: 'user',
+              content: `Please provide a more idiomatic and natural phrasing for this text: "${request.chineseText}". The text may contain both Chinese and English. If there are English words mixed in, translate them to Chinese if appropriate. Only respond with the improved text, nothing else.`
+            }]
+          })
+        });
+
+        const suggestionData = await suggestionResponse.json();
+
+        if (suggestionData.error) {
+          sendResponse({ success: false, error: suggestionData.error.message || JSON.stringify(suggestionData.error) });
+          return;
+        }
+
+        if (!suggestionData.content || !suggestionData.content[0] || !suggestionData.content[0].text) {
+          sendResponse({ success: false, error: 'Unexpected response format' });
+          return;
+        }
+
+        const suggestion = suggestionData.content[0].text;
+
+        // Second API call: Rate the usefulness
+        const ratingResponse = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 50,
+            messages: [{
+              role: 'user',
+              content: `你是一位汉语老师，正在帮助学习中文的学生。评估以下建议的有用性。
+
+一个有用的建议应该：
+1. 保留原句的意思
+2. 在措辞上提供有意义的改进
+3. 与原句有明显不同
+
+用0到1之间的数字评分，其中：
+1 表示非常有用（意思相同，措辞明显更好）
+0 表示没有用（意思不同、改进不明显）
+
+重要：如果建议与原句相似或完全一样，必须评分为 0（没有用）。
+
+只返回一个数字（例如：0.7），不要解释。
+
+原句：${request.chineseText}
+建议：${suggestion}`
+            }]
+          })
+        });
+
+        const ratingData = await ratingResponse.json();
+
+        let semanticDifference = 0.8; // Default fallback
+
+        if (ratingData.content && ratingData.content[0] && ratingData.content[0].text) {
+          const ratingText = ratingData.content[0].text;
+          const match = ratingText.match(/([0-9]*\.?[0-9]+)/);
+          if (match) {
+            semanticDifference = parseFloat(match[1]);
+            // Clamp to 0-1 range
+            semanticDifference = Math.max(0, Math.min(1, semanticDifference));
+          }
+        }
+
+        console.log('Claude usefulness score:', semanticDifference);
+
+        sendResponse({
+          success: true,
+          text: suggestion,
+          semanticDifference: semanticDifference
+        });
+
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
     });
 
     return true; // Keep the message channel open for async response

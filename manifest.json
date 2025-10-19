@@ -6,6 +6,10 @@
   "action": {
     "default_popup": "bridge.html"
   },
+  "options_page": "settings.html",
+  "permissions": [
+    "storage"
+  ],
   "background": {
     "service_worker": "background.js"
   },
