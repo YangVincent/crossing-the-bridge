@@ -1293,6 +1293,7 @@ async function handleSummarize() {
   const btn = summaryPanel.querySelector('#bridge-summarize-now-btn');
   const status = summaryPanel.querySelector('#bridge-panel-status');
   const loading = summaryPanel.querySelector('#bridge-panel-loading');
+  const loadingText = loading.querySelector('div');
   const result = summaryPanel.querySelector('#bridge-panel-result');
   const hskLevel = summaryPanel.querySelector('#bridge-hsk-select').value;
 
@@ -1301,6 +1302,12 @@ async function handleSummarize() {
     status.classList.remove('visible');
     result.classList.remove('visible');
     loading.classList.add('visible');
+    loadingText.textContent = 'Analyzing and summarizing...';
+
+    // Check API availability
+    if (!window.ai || !window.ai.summarizer) {
+      throw new Error('Chrome AI Summarizer API not available. Please ensure you are using Chrome 128+ with AI features enabled.');
+    }
 
     // Extract Chinese text from page
     const chineseText = extractChineseFromPage();
@@ -1309,13 +1316,21 @@ async function handleSummarize() {
       throw new Error('No Chinese text found on this page');
     }
 
-    // Limit text length
-    const maxLength = 3000;
+    // Limit text length (Summarizer API may have limits)
+    const maxLength = 4000; // Summarizer API can handle more text
     const textToSummarize = chineseText.length > maxLength
       ? chineseText.substring(0, maxLength) + '...'
       : chineseText;
 
-    // Get summary
+    console.log(`📊 Summarizing ${textToSummarize.length} characters at HSK ${hskLevel} level`);
+
+    // Check if model needs to be downloaded
+    const capabilities = await window.ai.summarizer.capabilities();
+    if (capabilities.available === 'after-download') {
+      loadingText.textContent = 'Downloading AI model... This may take a moment.';
+    }
+
+    // Get summary using Chrome's Summarizer API
     const summary = await getSummary(textToSummarize, hskLevel);
 
     // Display result
@@ -1324,10 +1339,18 @@ async function handleSummarize() {
     summaryPanel.querySelector('#bridge-result-text').textContent = summary;
     summaryPanel.querySelector('#bridge-result-badge').textContent = `HSK ${hskLevel}`;
 
+    console.log('✅ Summary generated successfully');
+
   } catch (error) {
-    console.error('Summarization error:', error);
+    console.error('❌ Summarization error:', error);
     loading.classList.remove('visible');
-    status.textContent = error.message;
+    
+    let errorMessage = error.message;
+    if (error.message.includes('not available')) {
+      errorMessage = 'AI Summarizer not available. Please update Chrome to version 128+ and enable AI features in chrome://flags';
+    }
+    
+    status.textContent = errorMessage;
     status.className = 'bridge-panel-status visible error';
   } finally {
     btn.disabled = false;
@@ -1349,8 +1372,10 @@ function extractChineseFromPage() {
 }
 
 async function getSummary(text, hskLevel) {
-  const settings = await chrome.storage.sync.get(['selectedModel']);
-  const selectedModel = settings.selectedModel || 'local';
+  // Check if Summarizer API is available
+  if (!window.ai || !window.ai.summarizer) {
+    throw new Error('Summarizer API not available. Please update Chrome to the latest version.');
+  }
 
   const hskDescriptions = {
     1: 'HSK 1 (150个基础词汇)',
@@ -1361,42 +1386,99 @@ async function getSummary(text, hskLevel) {
     6: 'HSK 6 (5000+个词汇)'
   };
 
-  const prompt = `Summarize the following Chinese text using only ${hskDescriptions[hskLevel]} vocabulary. Keep it concise (about 1/4 of original length) and use simple sentences.
+  try {
+    // Check summarizer capabilities
+    const canSummarize = await window.ai.summarizer.capabilities();
+    console.log('Summarizer capabilities:', canSummarize);
 
-Text to summarize:
-${text}
+    if (canSummarize.available === 'no') {
+      throw new Error('Summarizer API is not available on this device');
+    }
 
-Summary:`;
+    // Determine summary length based on HSK level
+    // Lower HSK levels should have shorter, simpler summaries
+    const summaryTypes = {
+      1: 'key-points',  // Most concise for beginners
+      2: 'key-points',
+      3: 'tl;dr',       // Medium length
+      4: 'tl;dr',
+      5: 'teaser',      // Longer for advanced
+      6: 'teaser'
+    };
 
-  const action = selectedModel === 'cloud' ? 'getIdiomaticPhrasing' : 'summarizeWithLocalLLM';
+    const summaryFormats = {
+      1: 'plain-text',
+      2: 'plain-text',
+      3: 'plain-text',
+      4: 'plain-text',
+      5: 'plain-text',
+      6: 'markdown'     // Advanced users can handle markdown
+    };
 
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { action: action, chineseText: prompt, hskLevel: hskLevel },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
+    // Create summarizer with options
+    const summarizer = await window.ai.summarizer.create({
+      type: summaryTypes[hskLevel] || 'tl;dr',
+      format: summaryFormats[hskLevel] || 'plain-text',
+      length: hskLevel <= 2 ? 'short' : hskLevel <= 4 ? 'medium' : 'long',
+      sharedContext: `Use only ${hskDescriptions[hskLevel]} vocabulary. Keep sentences simple and clear for Chinese language learners.`
+    });
 
-        if (response && response.success) {
-          let summary = response.text;
+    // If summarizer needs to download model
+    if (canSummarize.available === 'after-download') {
+      console.log('Downloading summarizer model...');
+      summarizer.addEventListener('downloadprogress', (e) => {
+        console.log(`Download progress: ${e.loaded}/${e.total}`);
+      });
+      await new Promise((resolve) => {
+        summarizer.addEventListener('ready', resolve, { once: true });
+      });
+    }
 
-          // Clean up response
-          const summaryMarker = 'Summary:';
-          const markerIndex = summary.lastIndexOf(summaryMarker);
-          if (markerIndex !== -1) {
-            summary = summary.substring(markerIndex + summaryMarker.length).trim();
-          }
+    // Generate summary
+    console.log(`Generating ${summaryTypes[hskLevel]} summary for HSK ${hskLevel}...`);
+    const summary = await summarizer.summarize(text);
+    
+    console.log('Summary generated:', summary);
 
-          summary = summary.replace(/^["'"\s]+|["'"\s]+$/g, '').trim();
-          resolve(summary);
-        } else {
-          reject(new Error(response?.error || 'Failed to generate summary'));
-        }
-      }
-    );
+    // Clean up
+    summarizer.destroy();
+
+    return summary;
+
+  } catch (error) {
+    console.error('Summarizer API error:', error);
+    
+    // Fallback to language model if summarizer fails
+    console.log('Falling back to Language Model API...');
+    return await getSummaryWithLanguageModel(text, hskLevel);
+  }
+}
+
+// Fallback function using Language Model API
+async function getSummaryWithLanguageModel(text, hskLevel) {
+  if (!window.ai || !window.ai.languageModel) {
+    throw new Error('AI APIs not available. Please update Chrome.');
+  }
+
+  const hskDescriptions = {
+    1: 'HSK 1 (150个基础词汇)',
+    2: 'HSK 2 (300个词汇)',
+    3: 'HSK 3 (600个词汇)',
+    4: 'HSK 4 (1200个词汇)',
+    5: 'HSK 5 (2500个词汇)',
+    6: 'HSK 6 (5000+个词汇)'
+  };
+
+  const session = await window.ai.languageModel.create({
+    systemPrompt: `You are a Chinese language tutor. Summarize texts using only ${hskDescriptions[hskLevel]} vocabulary appropriate for that HSK level.`
   });
+
+  const prompt = `Summarize this Chinese text using simple ${hskDescriptions[hskLevel]} vocabulary. Keep it concise and use short sentences:\n\n${text}\n\nSummary:`;
+  
+  const summary = await session.prompt(prompt);
+  session.destroy();
+
+  return summary.trim();
 }
 
 function handleCopy() {
