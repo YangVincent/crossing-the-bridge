@@ -54,7 +54,7 @@ function updatePersistentIconPosition() {
   if (!persistentIcon || !persistentIconTarget) return;
 
   const rect = persistentIconTarget.getBoundingClientRect();
-  const iconSize = 24; // Smaller icon size
+  const iconSize = 20; // Smaller icon size
   const offset = 6; // Internal padding from corner
 
   // Position at bottom-right corner INSIDE the input/dialog bounds

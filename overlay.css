@@ -393,13 +393,13 @@
 /* Persistent extension icon in bottom-right corner of input */
 .bridge-persistent-icon {
   position: fixed;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   z-index: 100001;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.95);
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
@@ -419,8 +419,8 @@
 
 /* Spinner style (blue circle) used during processing - smaller and more subtle */
 .bridge-persistent-spinner {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #324D7F; /* Match logo blue color */
   display: flex;
@@ -430,8 +430,8 @@
 
 .bridge-persistent-spinner::after {
   content: '';
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border: 1.5px solid rgba(255,255,255,0.95);
   border-top-color: transparent;
   border-radius: 50%;
