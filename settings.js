@@ -1,6 +1,7 @@
 // Settings page script
 const DEFAULT_MODEL = 'local';
 const DEFAULT_LIST_MODE = 'blocklist';
+const DEFAULT_ICON_VISIBLE = true;
 
 // Load saved settings when page opens
 document.addEventListener('DOMContentLoaded', async () => {
@@ -9,13 +10,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     'selectedModel',
     'anthropicApiKey',
     'listMode',
-    'urlPatterns'
+    'urlPatterns',
+    'bridge_icon_visible'
   ]);
 
   const selectedModel = result.selectedModel || DEFAULT_MODEL;
   const apiKey = result.anthropicApiKey || '';
   const listMode = result.listMode || DEFAULT_LIST_MODE;
   const urlPatterns = result.urlPatterns || [];
+  const iconVisible = result.bridge_icon_visible !== undefined ? result.bridge_icon_visible : DEFAULT_ICON_VISIBLE;
 
   // Set the radio button
   const radioButton = document.getElementById(`model-${selectedModel}`);
@@ -32,6 +35,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Show API key section if cloud is selected
   if (selectedModel === 'cloud') {
     document.getElementById('api-key-section').style.display = 'block';
+  }
+
+  // Set icon visibility
+  const iconVisibilityRadio = document.getElementById(iconVisible ? 'icon-visible' : 'icon-hidden');
+  if (iconVisibilityRadio) {
+    iconVisibilityRadio.checked = true;
+    updateRadioStyles();
   }
 
   // Set list mode
@@ -65,6 +75,13 @@ document.querySelectorAll('input[name="model"]').forEach(radio => {
     } else {
       apiKeySection.style.display = 'none';
     }
+  });
+});
+
+// Handle icon visibility radio button changes
+document.querySelectorAll('input[name="icon-visibility"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    updateRadioStyles();
   });
 });
 
@@ -189,6 +206,7 @@ function removePattern(index) {
 document.getElementById('save-button').addEventListener('click', async () => {
   const selectedModel = document.querySelector('input[name="model"]:checked')?.value || DEFAULT_MODEL;
   const apiKey = document.getElementById('api-key').value.trim();
+  const iconVisible = document.querySelector('input[name="icon-visibility"]:checked')?.value === 'true';
   const statusMessage = document.getElementById('status-message');
 
   // Validate cloud model has API key
@@ -204,7 +222,19 @@ document.getElementById('save-button').addEventListener('click', async () => {
       selectedModel: selectedModel,
       anthropicApiKey: apiKey,
       listMode: currentListMode,
-      urlPatterns: currentUrlPatterns
+      urlPatterns: currentUrlPatterns,
+      bridge_icon_visible: iconVisible
+    });
+
+    // Notify all tabs about the icon visibility change
+    const tabs = await chrome.tabs.query({});
+    tabs.forEach(tab => {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'updateIconVisibility',
+        visible: iconVisible
+      }).catch(() => {
+        // Ignore errors for tabs that don't have the content script
+      });
     });
 
     // Show success message

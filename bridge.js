@@ -13,6 +13,113 @@ let extensionEnabled = true; // Track if extension is enabled for this page
 let lastAcceptedSuggestion = null; // Store last accepted suggestion for undo
 let currentSuggestionContext = null; // Store current suggestion context (target, original, suggestion, etc.)
 
+// Persistent bottom-right icon management
+let persistentIcon = null;
+let persistentIconVisible = true; // default; persisted in storage
+let persistentIconTarget = null; // Track which input the icon is attached to
+
+// Create the persistent icon element for a specific target input
+function createPersistentIcon(target) {
+  if (persistentIcon) {
+    // If icon exists, just reposition it for the new target
+    persistentIconTarget = target;
+    updatePersistentIconPosition();
+    return persistentIcon;
+  }
+
+  persistentIcon = document.createElement('div');
+  persistentIcon.className = 'bridge-persistent-icon';
+  persistentIconTarget = target;
+
+  const img = document.createElement('img');
+  img.src = chrome.runtime.getURL('assets/logo.png');
+  img.alt = 'CTB';
+  persistentIcon.appendChild(img);
+
+  // Append to body
+  document.body.appendChild(persistentIcon);
+
+  // Position the icon
+  updatePersistentIconPosition();
+
+  // Update position on scroll/resize
+  window.addEventListener('scroll', updatePersistentIconPosition, true);
+  window.addEventListener('resize', updatePersistentIconPosition);
+
+  return persistentIcon;
+}
+
+// Update persistent icon position relative to its target input
+function updatePersistentIconPosition() {
+  if (!persistentIcon || !persistentIconTarget) return;
+
+  const rect = persistentIconTarget.getBoundingClientRect();
+  const iconSize = 24; // Smaller icon size
+  const offset = 6; // Internal padding from corner
+
+  // Position at bottom-right corner INSIDE the input/dialog bounds
+  persistentIcon.style.position = 'fixed';
+  persistentIcon.style.left = `${rect.right - iconSize - offset}px`;
+  persistentIcon.style.top = `${rect.bottom - iconSize - offset}px`;
+  
+  // Ensure icon stays within viewport bounds
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  
+  const currentLeft = parseFloat(persistentIcon.style.left);
+  const currentTop = parseFloat(persistentIcon.style.top);
+  
+  // Adjust if icon would overflow viewport
+  if (currentLeft + iconSize > viewportWidth) {
+    persistentIcon.style.left = `${viewportWidth - iconSize - offset}px`;
+  }
+  if (currentTop + iconSize > viewportHeight) {
+    persistentIcon.style.top = `${viewportHeight - iconSize - offset}px`;
+  }
+  
+  // Also ensure icon doesn't go beyond input left/top bounds
+  if (currentLeft < rect.left) {
+    persistentIcon.style.left = `${rect.left + offset}px`;
+  }
+  if (currentTop < rect.top) {
+    persistentIcon.style.top = `${rect.top + offset}px`;
+  }
+}
+
+// Initialize persistent icon visibility from storage (async)
+async function initPersistentIconSettings() {
+  try {
+    const stored = await chrome.storage.sync.get(['bridge_icon_visible']);
+    if (stored && typeof stored.bridge_icon_visible === 'boolean') {
+      persistentIconVisible = stored.bridge_icon_visible;
+    }
+  } catch (err) {
+    console.warn('Error reading icon visibility from storage', err);
+  }
+}
+
+// Show spinner state on the persistent icon (processing)
+function setPersistentIconProcessing(on = true) {
+  if (!persistentIcon) return;
+
+  // Clear children
+  while (persistentIcon.firstChild) persistentIcon.removeChild(persistentIcon.firstChild);
+
+  if (on) {
+    const spinner = document.createElement('div');
+    spinner.className = 'bridge-persistent-spinner';
+    persistentIcon.appendChild(spinner);
+  } else {
+    const img = document.createElement('img');
+    img.src = chrome.runtime.getURL('assets/logo.png');
+    img.alt = 'CTB';
+    persistentIcon.appendChild(img);
+  }
+}
+
+// Load icon settings when the script runs
+initPersistentIconSettings().catch(err => console.warn('initPersistentIconSettings error', err));
+
 // Check if extension should be enabled on this page
 async function checkIfEnabled() {
   const currentUrl = window.location.href;
@@ -141,65 +248,47 @@ function filterAndChunkText(text) {
   return sentencesToProcess;
 }
 
-// Show working indicator to the right of the input field
+// Show working indicator - now only uses persistent icon
 function showWorkingIndicator(target) {
-  // Remove any existing working indicator
+  // Remove any existing old-style working indicator (if present)
   if (workingIndicator) {
     workingIndicator.remove();
+    workingIndicator = null;
   }
 
-  const rect = target.getBoundingClientRect();
-  workingIndicator = document.createElement('div');
-  workingIndicator.className = 'bridge-working-indicator';
+  // Ensure persistent icon exists (create if needed)
+  if (!persistentIcon) {
+    createPersistentIcon(target);
+  }
 
-  // Add logo image
-  const logo = document.createElement('img');
-  logo.src = chrome.runtime.getURL('assets/logo.png');
-  logo.alt = 'Loading';
-  workingIndicator.appendChild(logo);
-
-  // Position to the right of the input field
-  workingIndicator.style.position = 'fixed';
-
-  // For inline elements (like span) with no height, use better positioning
-  const height = rect.height || 20; // Fallback to 20px if height is 0
-  const indicatorSize = 20; // Size of the indicator
-  workingIndicator.style.left = `${rect.right + 8}px`;
-  workingIndicator.style.top = `${rect.top + (height / 2) - (indicatorSize / 2)}px`;
-
-  // Ensure visibility
-  workingIndicator.style.display = 'flex';
-
-  document.body.appendChild(workingIndicator);
-
-  // Update position on scroll/resize
-  const updatePosition = () => {
-    if (!workingIndicator || !workingIndicator.parentNode) return;
-    const newRect = target.getBoundingClientRect();
-    const newHeight = newRect.height || 20; // Fallback to 20px if height is 0
-    const indicatorSize = 20;
-    workingIndicator.style.left = `${newRect.right + 8}px`;
-    workingIndicator.style.top = `${newRect.top + (newHeight / 2) - (indicatorSize / 2)}px`;
-  };
-
-  window.addEventListener('scroll', updatePosition, true);
-  window.addEventListener('resize', updatePosition);
-
-  // Store cleanup function
-  workingIndicator._cleanup = () => {
-    window.removeEventListener('scroll', updatePosition, true);
-    window.removeEventListener('resize', updatePosition);
-  };
+  // Set persistent icon to processing state (blue spinner)
+  try { 
+    setPersistentIconProcessing(true);
+    // Show icon during processing even if user preference is hidden
+    if (persistentIcon && persistentIconVisible) {
+      persistentIcon.style.display = 'flex';
+    }
+  } catch (e) { 
+    console.warn('Could not set persistent icon processing state', e);
+  }
 }
 
 // Hide working indicator
 function hideWorkingIndicator() {
+  // Remove any old-style working indicator if it exists
   if (workingIndicator) {
     if (workingIndicator._cleanup) {
       workingIndicator._cleanup();
     }
     workingIndicator.remove();
     workingIndicator = null;
+  }
+  
+  // Restore persistent icon to normal state (logo)
+  try { 
+    setPersistentIconProcessing(false); 
+  } catch (e) { 
+    console.warn('Could not restore persistent icon state', e);
   }
 }
 
@@ -899,6 +988,13 @@ document.addEventListener('keydown', (event) => {
   if (isTextInput) {
     lastTarget = target;
 
+    // Always create/update persistent icon for this input (for processing state tracking)
+    // But only show it if user preference is to show it
+    createPersistentIcon(target);
+    if (persistentIcon) {
+      persistentIcon.style.display = persistentIconVisible ? 'flex' : 'none';
+    }
+
     // Clear previous debounce timer
     if (debounceTimer) {
       clearTimeout(debounceTimer);
@@ -919,8 +1015,39 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// Listen for focus events to show persistent icon on input fields
+document.addEventListener('focus', (event) => {
+  if (!extensionEnabled) return;
+
+  const target = event.target;
+  const isTextInput =
+    target.tagName === 'INPUT' &&
+    ['text', 'email', 'password', 'search', 'tel', 'url', 'textarea', 'div'].includes(target.type) ||
+    target.tagName === 'TEXTAREA' ||
+    target.isContentEditable;
+
+  if (isTextInput) {
+    // Always create icon (for processing state tracking)
+    // But only show it if user preference is to show it
+    createPersistentIcon(target);
+    if (persistentIcon) {
+      persistentIcon.style.display = persistentIconVisible ? 'flex' : 'none';
+    }
+  }
+}, true);
+
 // Listen for messages from popup to disable extension for current page
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Handle icon visibility updates from settings page
+  if (request.action === 'updateIconVisibility') {
+    persistentIconVisible = request.visible;
+    if (persistentIcon) {
+      persistentIcon.style.display = request.visible ? 'flex' : 'none';
+    }
+    sendResponse({ success: true });
+    return;
+  }
+
   if (request.action === 'disableForCurrentPage') {
     const currentUrl = window.location.href;
     chrome.storage.sync.get(['urlPatterns', 'listMode'], (result) => {

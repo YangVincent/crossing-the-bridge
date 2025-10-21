@@ -432,6 +432,34 @@
       </div>
     </div>
 
+    <div class="setting-section">
+      <label class="setting-label">Persistent Icon</label>
+      
+      <div class="help-text" style="margin-bottom: 12px;">
+        Show a small icon in the bottom-right corner of input fields to indicate the extension is active. The icon shows a blue spinner when processing text.
+      </div>
+
+      <label class="radio-option" for="icon-visible">
+        <input type="radio" id="icon-visible" name="icon-visibility" value="true">
+        <div class="radio-content">
+          <div class="radio-title">Show Icon</div>
+          <div class="radio-description">
+            Display the persistent icon in input fields (recommended for visual feedback)
+          </div>
+        </div>
+      </label>
+
+      <label class="radio-option" for="icon-hidden">
+        <input type="radio" id="icon-hidden" name="icon-visibility" value="false">
+        <div class="radio-content">
+          <div class="radio-title">Hide Icon</div>
+          <div class="radio-description">
+            Hide the persistent icon for a cleaner interface
+          </div>
+        </div>
+      </label>
+    </div>
+
     <button class="save-button" id="save-button">Save Settings</button>
 
     <div class="status-message" id="status-message"></div>

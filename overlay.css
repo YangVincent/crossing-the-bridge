@@ -56,43 +56,33 @@
   transform: translateX(-50%) rotate(45deg);
 }
 
-/* Working indicator icon */
+/* Working indicator: blue circular spinner */
 .bridge-working-indicator {
   position: absolute;
   width: 20px;
   height: 20px;
+  border-radius: 50%;
+  background: #1a73e8;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 999999;
   pointer-events: none;
-  background: transparent;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-.bridge-working-indicator img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  filter: hue-rotate(0deg);
-  animation: bridge-hue-shift 2s ease-in-out infinite;
+.bridge-working-indicator::after {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgba(255,255,255,0.95);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: bridge-spin 0.6s linear infinite;
 }
 
-@keyframes bridge-hue-shift {
-  0% {
-    filter: hue-rotate(0deg);
-  }
-  25% {
-    filter: hue-rotate(150deg);
-  }
-  50% {
-    filter: hue-rotate(210deg);
-  }
-  75% {
-    filter: hue-rotate(270deg);
-  }
-  100% {
-    filter: hue-rotate(360deg);
-  }
+@keyframes bridge-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Floating summary panel */
@@ -337,6 +327,58 @@
   height: 32px;
   margin: 0 auto 12px;
   animation: bridge-hue-shift 2s ease-in-out infinite;
+}
+
+/* Persistent extension icon in bottom-right corner of input */
+.bridge-persistent-icon {
+  position: fixed;
+  width: 24px;
+  height: 24px;
+  z-index: 100001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  transition: transform 0.2s ease;
+}
+
+.bridge-persistent-icon:hover {
+  transform: scale(1.1);
+}
+
+.bridge-persistent-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Spinner style (blue circle) used during processing - smaller and more subtle */
+.bridge-persistent-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #324D7F; /* Match logo blue color */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bridge-persistent-spinner::after {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid rgba(255,255,255,0.95);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: bridge-spin 0.6s linear infinite;
+}
+
+@keyframes bridge-spin {
+  to { transform: rotate(360deg); }
 }
 
 .bridge-panel-status {
