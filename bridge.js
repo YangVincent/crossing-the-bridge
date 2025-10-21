@@ -122,30 +122,35 @@ initPersistentIconSettings().catch(err => console.warn('initPersistentIconSettin
 
 // Check if extension should be enabled on this page
 async function checkIfEnabled() {
-  const currentUrl = window.location.href;
-  const settings = await chrome.storage.sync.get(['listMode', 'urlPatterns']);
-  const listMode = settings.listMode || 'blocklist';
-  const urlPatterns = settings.urlPatterns || [];
+  try {
+    const currentUrl = window.location.href;
+    const settings = await chrome.storage.sync.get(['listMode', 'urlPatterns']);
+    const listMode = settings.listMode || 'blocklist';
+    const urlPatterns = settings.urlPatterns || [];
 
-  // If no patterns, use default behavior
-  if (urlPatterns.length === 0) {
-    return listMode === 'blocklist'; // Enabled by default in blocklist mode
-  }
-
-  // Check if URL matches any pattern
-  const matches = urlPatterns.some(pattern => {
-    try {
-      const regex = new RegExp(pattern);
-      return regex.test(currentUrl);
-    } catch (e) {
-      console.error('Invalid regex pattern:', pattern, e);
-      return false;
+    // If no patterns, use default behavior
+    if (urlPatterns.length === 0) {
+      return listMode === 'blocklist'; // Enabled by default in blocklist mode
     }
-  });
 
-  // In blocklist mode: enabled if URL does NOT match
-  // In allowlist mode: enabled if URL DOES match
-  return listMode === 'blocklist' ? !matches : matches;
+    // Check if URL matches any pattern
+    const matches = urlPatterns.some(pattern => {
+      try {
+        const regex = new RegExp(pattern);
+        return regex.test(currentUrl);
+      } catch (e) {
+        console.error('Invalid regex pattern:', pattern, e);
+        return false;
+      }
+    });
+
+    // In blocklist mode: enabled if URL does NOT match
+    // In allowlist mode: enabled if URL DOES match
+    return listMode === 'blocklist' ? !matches : matches;
+  } catch (error) {
+    console.warn('Error checking if extension should be enabled:', error.message);
+    return true; // Default to enabled if error occurs
+  }
 }
 
 // Initialize extension
@@ -768,25 +773,33 @@ async function processSentence(sentence, target, processingId) {
       return;
     }
 
-    // Get the selected model from settings
-    const settings = await chrome.storage.sync.get(['selectedModel']);
-    const selectedModel = settings.selectedModel || 'local';
+    try {
+      // Get the selected model from settings
+      const settings = await chrome.storage.sync.get(['selectedModel']);
+      const selectedModel = settings.selectedModel || 'local';
 
-    // Choose the appropriate action based on selected model
-    const action = selectedModel === 'cloud' ? 'getIdiomaticPhrasing' : 'getIdiomaticPhrasingLocal';
+      // Choose the appropriate action based on selected model
+      const action = selectedModel === 'cloud' ? 'getIdiomaticPhrasing' : 'getIdiomaticPhrasingLocal';
 
-    console.log(`Using ${selectedModel} model for translation`);
+      console.log(`Using ${selectedModel} model for translation`);
 
-    // Make API call for this sentence
-    chrome.runtime.sendMessage(
-      { action: action, chineseText: sentence },
-      (response) => {
-        // Check if this processing session has been cancelled
-        if (processingId !== activeProcessingId) {
-          console.log('Discarding outdated response for:', sentence);
-          resolve(null);
-          return;
-        }
+      // Make API call for this sentence
+      chrome.runtime.sendMessage(
+        { action: action, chineseText: sentence },
+        (response) => {
+          // Check for extension context invalidation
+          if (chrome.runtime.lastError) {
+            console.warn('Extension context invalidated:', chrome.runtime.lastError.message);
+            resolve(null);
+            return;
+          }
+
+          // Check if this processing session has been cancelled
+          if (processingId !== activeProcessingId) {
+            console.log('Discarding outdated response for:', sentence);
+            resolve(null);
+            return;
+          }
 
         if (response && response.success) {
           const result = {
@@ -806,6 +819,11 @@ async function processSentence(sentence, target, processingId) {
         }
       }
     );
+    } catch (error) {
+      // Handle extension context invalidation or other errors
+      console.warn('Error in processSentence:', error.message);
+      resolve(null);
+    }
   });
 }
 
