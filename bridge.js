@@ -380,12 +380,46 @@ function acceptSuggestion(target, originalText, suggestion, indicator) {
 }
 
 // Show popup with suggestion
-function showPopup(target, originalText, suggestion, textWidth, textLeft, indicator, semanticDifference = 0) {
+function showPopup(target, originalText, suggestion, textWidth, textLeft, indicator, semanticDifference = 0, errors = []) {
   const popup = createPopup();
   const suggestionEl = popup.querySelector('.bridge-popup-suggestion');
   const originalEl = popup.querySelector('.bridge-popup-original');
 
-  suggestionEl.textContent = suggestion;
+  // Add error type labels and details if errors exist
+  let errorDetailsHTML = '';
+  if (errors && errors.length > 0) {
+    // Add specific error corrections with error type labels
+    if (errors.some(e => e.suggestion)) {
+      errorDetailsHTML += '<div class="bridge-error-correction">';
+      errors.forEach(error => {
+        if (error.suggestion) {
+          errorDetailsHTML += `<div class="bridge-error-correction-item">`;
+          // Add error type label in gray before each error
+          errorDetailsHTML += `<span class="bridge-error-type">${error.type}</span> `;
+          errorDetailsHTML += `<span class="bridge-error-old-text">${error.text}</span>`;
+          errorDetailsHTML += ` → `;
+          errorDetailsHTML += `<span class="bridge-error-new-text">${error.suggestion}</span>`;
+          errorDetailsHTML += `</div>`;
+          // Add explanation text if available
+          if (error.explanation) {
+            errorDetailsHTML += `<div style="font-size: 11px; color: #666; margin-top: 2px; padding-left: 8px;">`;
+            errorDetailsHTML += error.explanation;
+            errorDetailsHTML += `</div>`;
+          }
+        }
+      });
+      errorDetailsHTML += '</div>';
+    }
+
+    // Add overall suggestion with better styling
+    errorDetailsHTML += '<div style="color: #1a73e8; font-weight: 500; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0;">';
+    errorDetailsHTML += '建议：' + suggestion;
+    errorDetailsHTML += '</div>';
+
+    suggestionEl.innerHTML = errorDetailsHTML;
+  } else {
+    suggestionEl.textContent = suggestion;
+  }
 
   // Include semantic difference in the original text display if available
   if (semanticDifference > 0) {
@@ -472,7 +506,7 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
 }
 
 // Create overlay wrapper for contentEditable elements
-function createOverlayForContentEditable(target, originalText, suggestion, semanticDifference = 0) {
+function createOverlayForContentEditable(target, originalText, suggestion, semanticDifference = 0, errors = []) {
   // Remove any existing indicator
   if (currentIndicator) {
     currentIndicator.remove();
@@ -480,6 +514,10 @@ function createOverlayForContentEditable(target, originalText, suggestion, seman
   }
 
   console.log(`Creating overlay - Semantic difference: ${semanticDifference}`);
+  console.log(`Errors detected:`, errors);
+
+  // Determine underline style based on whether errors exist
+  const underlineClass = (errors && errors.length > 0) ? 'bridge-error-underline' : 'bridge-suggestion-underline';
 
   // Calculate the width of the actual text
   const measureText = (text, element) => {
@@ -568,13 +606,14 @@ function createOverlayForContentEditable(target, originalText, suggestion, seman
 
   // Create a visual indicator (underline effect)
   const indicator = document.createElement('div');
-  indicator.className = 'bridge-suggestion-underline';
+  indicator.className = underlineClass; // Use dynamic class based on error detection
   indicator.style.position = 'fixed'; // Use fixed instead of absolute for better positioning
   indicator.style.left = `${rect.left + paddingLeft}px`;
   indicator.style.top = `${rect.bottom - 5}px`;
   indicator.style.width = '0px'; // Start with 0 width for animation
   indicator.style.height = '3px'; // Thinner underline
-  indicator.style.backgroundColor = '#1a73e8';
+  // Use red for errors, blue for suggestions
+  indicator.style.backgroundColor = (errors && errors.length > 0) ? '#dc3545' : '#1a73e8';
   indicator.style.cursor = 'pointer';
   indicator.style.zIndex = '999999';
   indicator.style.pointerEvents = 'auto';
@@ -595,7 +634,7 @@ function createOverlayForContentEditable(target, originalText, suggestion, seman
   });
 
   // Show popup immediately when overlay is created
-  const currentPopup = showPopup(target, originalText, suggestion, textWidth, rect.left + paddingLeft, indicator, semanticDifference);
+  const currentPopup = showPopup(target, originalText, suggestion, textWidth, rect.left + paddingLeft, indicator, semanticDifference, errors);
 
   // Update indicator position and size on scroll/resize
   const updateIndicatorPosition = () => {
@@ -790,23 +829,32 @@ async function processSentence(sentence, target, processingId) {
         (response) => {
           // Check for extension context invalidation
           if (chrome.runtime.lastError) {
-            console.warn('Extension context invalidated:', chrome.runtime.lastError.message);
+            console.warn('⚠️ Extension context error:', chrome.runtime.lastError.message);
+            resolve(null);
+            return;
+          }
+
+          // Check if response exists
+          if (!response) {
+            console.warn('⚠️ No response received for:', sentence);
             resolve(null);
             return;
           }
 
           // Check if this processing session has been cancelled
           if (processingId !== activeProcessingId) {
-            console.log('Discarding outdated response for:', sentence);
+            console.log('⏭️ Discarding outdated response for:', sentence);
             resolve(null);
             return;
           }
 
         if (response && response.success) {
+          console.log('✅ Received successful response:', response);
           const result = {
             suggestion: response.text,
             usefulness: response.semanticDifference || 0, // Use the returned score from either model
-            originalSentence: sentence
+            originalSentence: sentence,
+            errors: response.errors || [] // Include error information from Proofreader API
           };
 
           // Cache the result
@@ -888,6 +936,7 @@ async function getIdiomaticPhrasing(chineseText, target) {
     let combinedOriginal = filteredText;
     let combinedSuggestion = filteredText;
     let maxUsefulness = 0;
+    let allErrors = []; // Collect all errors from results
 
     // Replace each original sentence with its suggestion in the combined text
     usefulResults.forEach(result => {
@@ -899,6 +948,11 @@ async function getIdiomaticPhrasing(chineseText, target) {
       // Track the highest usefulness score
       maxUsefulness = Math.max(maxUsefulness, result.usefulness);
       
+      // Collect errors
+      if (result.errors && result.errors.length > 0) {
+        allErrors = allErrors.concat(result.errors);
+      }
+      
       // Cache individual mappings
       suggestionCache.set(result.suggestion, result.originalSentence);
     });
@@ -906,10 +960,11 @@ async function getIdiomaticPhrasing(chineseText, target) {
     console.log('Combined original:', combinedOriginal);
     console.log('Combined suggestion:', combinedSuggestion);
     console.log('Max usefulness:', maxUsefulness);
+    console.log('All errors:', allErrors);
 
     // Show one overlay for the entire combined suggestion
     if (combinedSuggestion !== combinedOriginal) {
-      createOverlayForContentEditable(target, combinedOriginal, combinedSuggestion, maxUsefulness);
+      createOverlayForContentEditable(target, combinedOriginal, combinedSuggestion, maxUsefulness, allErrors);
     } else {
       console.log('Combined suggestion identical to original, not showing');
     }

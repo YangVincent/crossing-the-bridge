@@ -68,6 +68,7 @@ async function ensureModelAvailable() {
 
 // Reuse a single session for better performance
 let modelSession = null;
+let translatorSession = null;
 
 async function getOrCreateSession() {
   if (!modelSession) {
@@ -83,23 +84,244 @@ async function getOrCreateSession() {
   return modelSession;
 }
 
-async function rephraseChinese(text, hint = "自然、礼貌的改写") {
-  const session = await getOrCreateSession();
+// --- Translation API helper functions ---
+async function ensureTranslatorAvailable() {
+  if (typeof translation === "undefined" || !translation.canTranslate) {
+    console.warn("Translation API not available in this browser");
+    return false;
+  }
+  try {
+    const availability = await translation.canTranslate({
+      sourceLanguage: 'en',
+      targetLanguage: 'zh'
+    });
+    console.log("Translator availability:", availability);
+    return availability === "readily" || availability === "after-download";
+  } catch (e) {
+    console.error("Error checking translator availability:", e);
+    return false;
+  }
+}
 
-  // Simplified, more direct prompt for faster processing
-  /*const prompt = `请提供更自然、地道的改写。如果文本已经很自然、地道，不需要改动，请返回空字符串。只返回改写后的文本，不要其他内容。
+async function getOrCreateTranslator() {
+  if (!translatorSession) {
+    const canTranslate = await ensureTranslatorAvailable();
+    if (!canTranslate) {
+      throw new Error("Translation API not available. Try updating Chrome.");
+    }
+    
+    console.log("Creating translator session...");
+    translatorSession = await translation.createTranslator({
+      sourceLanguage: 'en',
+      targetLanguage: 'zh'
+    });
+    console.log("Translator session ready");
+  }
+  return translatorSession;
+}
 
-文本：${text}`;*/
+// --- Proofreader API helper functions ---
+// Note: Chrome Proofreader API is experimental/not yet available
+// Using LLM-based error detection as fallback
+
+// Detect errors in Chinese text using LLM with few-shot learning
+async function detectErrors(text) {
+  try {
+    const session = await getOrCreateSession();
+    
+    // Use few-shot learning with specific examples to guide the LLM
+    const errorDetectionPrompt = `你是专业的中文校对专家。请仔细检查文本中的所有错误。
+
+## 错误类型：
+1. 字词错误：只标记明显的错别字和用词完全错误的情况（如"世界文明"应为"世界闻名"）
+2. 标点误用：英文标点应改为中文标点（如","改为"，"、"."改为"。"）
+3. 语法问题：真正的语法错误、搭配不当
+4. 语序问题：词序不当
+
+## 严格禁止的行为：
+❌ 绝对不要将"闻名"改为"著名"或将"著名"改为"闻名"
+❌ 绝对不要将"到现在"改为"至今"或将"至今"改为"到现在"
+❌ 不要替换任何意思相近的正确用词
+❌ 不要过度纠正风格问题
+❌ 只标记明显的错误
+
+## 必须遵守的规则：
+✅ 如果一个句子有多个错误，必须全部列出
+✅ 不要遗漏任何明显的错误
+✅ "因为...所以..."是正确用法
+✅ "之所以...是因为..."是正确用法
+✅ "世界闻名"是完全正确的表达，比"世界著名"更好
+✅ 只有真正用错的词才标记（如"涉及"误用为"设计"的场合）
+❌ 只标记明显的错误
+
+## 学习示例：
+
+【示例1 - 正确用法：世界闻名不要改】
+输入："河北省赵县的洨河上，有一座世界闻名的石拱桥。"
+输出：[]
+
+【示例2 - 正确用法：世界著名不要改】
+输入："河北省赵县的洨河上，有一座世界著名的石拱桥。"
+输出：[]
+
+【示例3 - 错误用法：文明改为闻名】
+输入："河北省赵县的洨河上，有一座世界文明的石拱桥。"
+输出：[{"text":"文明","type":"字词错误","suggestion":"闻名","explanation":"此处应为世界闻名，文明是错误用词"}]
+
+【示例4 - 字词错误：涉及vs设计】
+输入："这个桥梁的涉及很独特。"
+输出：[{"text":"涉及","type":"字词错误","suggestion":"设计","explanation":"涉及指关联到、牵涉到。设计指根据要求预先制定图样、方案。此处应为设计"}]
+
+【示例5 - 正确用法：到现在】
+输入："到现在已经有一千多年了。"
+输出：[]
+
+【示例6 - 正确用法：至今】
+输入："至今已经有一千多年了。"
+输出：[]
+
+【示例7 - 单个标点错误】
+输入："这是一个很好的想法,我们应该试试。"
+输出：[{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号"}]
+
+【示例8 - 多个标点错误】
+输入："你好,我叫小明.你叫什么名字?"
+输出：[{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号"},{"text":".","type":"标点误用","suggestion":"。","explanation":"应使用中文句号"},{"text":"?","type":"标点误用","suggestion":"？","explanation":"应使用中文问号"}]
+
+【示例9 - 多个错误同时存在】
+输入："河北省赵县的洨河上,有一座世界文明的石拱桥。"
+输出：[{"text":"文明","type":"字词错误","suggestion":"闻名","explanation":"此处应为世界闻名，文明是错误用词"},{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号"}]
+
+【示例10 - 正确用法】
+输入："因为下雨，所以我没去。"
+输出：[]
+
+## 现在检查以下文本的所有错误：
+文本：${text}
+
+要求：
+1. 找出所有字词错误（只标记真正用错的词，不要替换意思相近的正确词）
+2. 找出所有标点错误
+3. 找出所有语法错误
+4. 找出所有语序错误
+5. 如果有多个错误，必须全部返回
+
+请只返回纯JSON数组，不要任何额外说明：`;
+
+    console.log("🔍 Detecting errors with LLM...");
+    
+    const response = await session.prompt(errorDetectionPrompt);
+    console.log("📝 Raw error detection response:", response);
+    
+    // Parse the JSON response
+    try {
+      // Clean up the response - remove markdown code blocks if present
+      let cleanResponse = response.trim();
+      
+      // Remove markdown code blocks
+      if (cleanResponse.includes('```')) {
+        cleanResponse = cleanResponse.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+      }
+      
+      // Find JSON array in the response
+      const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        cleanResponse = jsonMatch[0];
+      }
+      
+      const errors = JSON.parse(cleanResponse);
+      console.log("✅ Parsed errors:", errors);
+      
+      return Array.isArray(errors) ? errors : [];
+    } catch (parseError) {
+      console.warn("⚠️ Could not parse error detection response:", parseError);
+      console.warn("Raw response was:", response);
+      // Return empty array instead of failing
+      return [];
+    }
+  } catch (error) {
+    console.error("❌ Error detecting errors:", error);
+    return []; // Return empty array if detection fails
+  }
+}
+
+// Detect and translate English words/phrases in Chinese text
+async function translateEnglishInText(text) {
+  // Check if text contains English
+  const englishRegex = /[a-zA-Z]+/g;
+  const englishMatches = text.match(englishRegex);
   
-  const prompt = `你是一位汉语老师，正在建议使用惯用语。
+  if (!englishMatches || englishMatches.length === 0) {
+    return text; // No English to translate
+  }
+
+  try {
+    const translator = await getOrCreateTranslator();
+    let translatedText = text;
+    
+    // Translate each English word/phrase
+    for (const englishWord of englishMatches) {
+      const translation = await translator.translate(englishWord);
+      // Replace first occurrence of the English word with its translation
+      translatedText = translatedText.replace(englishWord, translation);
+    }
+    
+    console.log("Translated English in text:", text, "->", translatedText);
+    return translatedText;
+  } catch (error) {
+    console.error("Error translating English in text:", error);
+    return text; // Return original if translation fails
+  }
+}
+
+async function rephraseChinese(text, hint = "自然、礼貌的改写") {
+  console.log("🚀 Starting rephraseChinese for:", text);
+  
+  // First, detect errors using LLM-based error detection
+  let errors = [];
+  try {
+    console.log("🔍 Step 1: Detecting errors...");
+    errors = await detectErrors(text);
+    console.log("✅ Detected errors:", errors);
+  } catch (error) {
+    console.warn("⚠️ Could not detect errors, continuing:", error);
+  }
+
+  // Second, translate any English words to Chinese using the Translator API
+  let processedText = text;
+  try {
+    console.log("🌐 Step 2: Translating English words...");
+    processedText = await translateEnglishInText(text);
+    console.log("✅ Text after English translation:", processedText);
+  } catch (error) {
+    console.warn("⚠️ Could not translate English words, continuing with original text:", error);
+  }
+
+  console.log("📝 Step 3: Getting LLM suggestion...");
+  const session = await getOrCreateSession();
+  
+  // If we found errors, incorporate them into the prompt
+  let prompt = '';
+  if (errors.length > 0) {
+    const errorContext = errors.map(e => `"${e.text}"应改为"${e.suggestion}"`).join('，');
+    prompt = `你是一位汉语老师，正在建议使用惯用语。
+
+已检测到以下错误：${errorContext}
+
+请提供改进后的完整句子。只返回改进后的文本，不要其他内容。
+
+原文：${processedText}`;
+  } else {
+    prompt = `你是一位汉语老师，正在建议使用惯用语。
   首先，判断文本是否足够长，需要改写。如果不是，则返回
   一个空字符串。然后，判断文本是否自然、地道。
-  如果是，则返回一个空字符串。最后，只有当句子完全错误，或者句子包含英语时，
+  如果是，则返回一个空字符串。最后，只有当句子不够地道时，
   才将整个句子翻译成惯用的汉语。
   只返回一个答案。
   除了改写的文本外，不要返回任何其他内容。
   不要包含解释或你的想法。
-  消息如下： ${text}`;
+  消息如下： ${processedText}`;
+  }
 
   console.log("Prompt being sent to Gemini Nano:", prompt);
 
@@ -128,7 +350,7 @@ async function rephraseChinese(text, hint = "自然、礼貌的改写") {
 
 只返回一个数字（例如：0.7），不要解释。
 
-原句：${text}
+原句：${processedText}
 建议：${suggestion}`;
 
     console.log("Usefulness rating prompt:", ratingPrompt);
@@ -147,7 +369,7 @@ async function rephraseChinese(text, hint = "自然、礼貌的改写") {
     console.log("Usefulness score:", semanticDifference);
   }
 
-  return { text: suggestion, semanticDifference };
+  return { text: suggestion, semanticDifference, errors };
 }
 
 // --- 2️⃣ Download model and create session on startup ---
@@ -165,15 +387,27 @@ downloadModel()
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // a) Local rephrasing (Gemini Nano)
   if (request.action === "getIdiomaticPhrasingLocal") {
-
+    console.log("📨 Received getIdiomaticPhrasingLocal request");
+    
     rephraseChinese(request.chineseText)
-      .then(result => sendResponse({
-        success: true,
-        text: result.text,
-        semanticDifference: result.semanticDifference
-      }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true; //
+      .then(result => {
+        console.log("✅ Sending success response:", result);
+        sendResponse({
+          success: true,
+          text: result.text,
+          semanticDifference: result.semanticDifference,
+          errors: result.errors || []
+        });
+      })
+      .catch(err => {
+        console.error("❌ Error in rephraseChinese:", err);
+        sendResponse({ 
+          success: false, 
+          error: err.message,
+          errors: []
+        });
+      });
+    return true; // Keep channel open for async response
   }
 
   // c) Local summarization (Gemini Nano)
