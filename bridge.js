@@ -307,6 +307,7 @@ function createPopup() {
     <div class="bridge-popup-arrow"></div>
     <div class="bridge-popup-suggestion"></div>
     <div class="bridge-popup-original"></div>
+    <div class="bridge-popup-shortcuts">Tab: Accept • Esc: Reject • Shift+Tab: Undo</div>
   `;
   document.body.appendChild(popup);
   return popup;
@@ -944,6 +945,24 @@ document.addEventListener('keydown', (event) => {
       currentSuggestionContext.suggestion,
       currentSuggestionContext.indicator
     );
+    currentSuggestionContext = null;
+    return;
+  }
+
+  // Handle Escape key to reject suggestion
+  if (event.key === 'Escape' && currentSuggestionContext && popup && popup.classList.contains('visible')) {
+    event.preventDefault();
+    console.log('Escape pressed - rejecting suggestion');
+    
+    // Hide popup
+    popup.classList.remove('visible');
+    
+    // Remove indicator
+    if (currentSuggestionContext.indicator && currentSuggestionContext.indicator.parentNode) {
+      currentSuggestionContext.indicator.remove();
+    }
+    
+    // Clear context
     currentSuggestionContext = null;
     return;
   }
