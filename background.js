@@ -124,6 +124,26 @@ async function getOrCreateTranslator() {
 // Note: Chrome Proofreader API is experimental/not yet available
 // Using LLM-based error detection as fallback
 
+// Error type translation mapping
+const ERROR_TYPE_TRANSLATIONS = {
+  '字词错误': {
+    en: 'Word Error',
+    zh: '字词错误'
+  },
+  '标点误用': {
+    en: 'Punctuation Error',
+    zh: '标点误用'
+  },
+  '语序问题': {
+    en: 'Word Order Problem',
+    zh: '语序问题'
+  },
+  '语法问题': {
+    en: 'Grammar Problem',
+    zh: '语法问题'
+  }
+};
+
 // Detect errors in Chinese text using LLM with few-shot learning
 async function detectErrors(text) {
   try {
@@ -177,11 +197,11 @@ async function detectErrors(text) {
 
 【示例3 - 错误用法：文明改为闻名】
 输入："河北省赵县的洨河上，有一座世界文明的石拱桥。"
-输出：[{"text":"文明","type":"字词错误","suggestion":"闻名","explanation":"此处应为世界闻名，文明是错误用词"}]
+输出：[{"text":"文明","type":"字词错误","suggestion":"闻名","explanation":"此处应为世界闻名，文明是错误用词","explanationEn":"Should be '世界闻名' (world-famous), '文明' (civilization) is incorrect here"}]
 
 【示例4 - 字词错误：涉及vs设计】
 输入："这个桥梁的涉及很独特。"
-输出：[{"text":"涉及","type":"字词错误","suggestion":"设计","explanation":"涉及指关联到、牵涉到。设计指根据要求预先制定图样、方案。此处应为设计"}]
+输出：[{"text":"涉及","type":"字词错误","suggestion":"设计","explanation":"涉及指关联到、牵涉到。设计指根据要求预先制定图样、方案。此处应为设计","explanationEn":"'涉及' means involve/relate to. '设计' means design/plan. Should be '设计' here"}]
 
 【示例5 - 正确用法：到现在】
 输入："到现在已经有一千多年了。"
@@ -193,15 +213,15 @@ async function detectErrors(text) {
 
 【示例7 - 单个标点错误】
 输入："这是一个很好的想法,我们应该试试。"
-输出：[{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号"}]
+输出：[{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号","explanationEn":"Should use Chinese comma"}]
 
 【示例8 - 多个标点错误】
 输入："你好,我叫小明.你叫什么名字?"
-输出：[{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号"},{"text":".","type":"标点误用","suggestion":"。","explanation":"应使用中文句号"},{"text":"?","type":"标点误用","suggestion":"？","explanation":"应使用中文问号"}]
+输出：[{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号","explanationEn":"Should use Chinese comma"},{"text":".","type":"标点误用","suggestion":"。","explanation":"应使用中文句号","explanationEn":"Should use Chinese period"},{"text":"?","type":"标点误用","suggestion":"？","explanation":"应使用中文问号","explanationEn":"Should use Chinese question mark"}]
 
 【示例9 - 多个错误同时存在】
 输入："河北省赵县的洨河上,有一座世界文明的石拱桥。"
-输出：[{"text":"文明","type":"字词错误","suggestion":"闻名","explanation":"此处应为世界闻名，文明是错误用词"},{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号"}]
+输出：[{"text":"文明","type":"字词错误","suggestion":"闻名","explanation":"此处应为世界闻名，文明是错误用词","explanationEn":"Should be '世界闻名' (world-famous), '文明' is incorrect"},{"text":",","type":"标点误用","suggestion":"，","explanation":"应使用中文逗号","explanationEn":"Should use Chinese comma"}]
 
 【示例10 - 正确用法】
 输入："因为下雨，所以我没去。"
@@ -226,23 +246,23 @@ async function detectErrors(text) {
 
 【示例15 - 语序问题：副词位置错误】
 输入："很我喜欢这座桥。"
-输出：[{"text":"很我喜欢","type":"语序问题","suggestion":"我很喜欢","explanation":"副词'很'应该放在主语'我'之后，动词'喜欢'之前"}]
+输出：[{"text":"很我喜欢","type":"语序问题","suggestion":"我很喜欢","explanation":"副词'很'应该放在主语'我'之后，动词'喜欢'之前","explanationEn":"The adverb '很' should be placed after the subject '我' and before the verb '喜欢'"}]
 
 【示例16 - 语序问题：定语位置错误】
 输入："我买了漂亮一件衣服。"
-输出：[{"text":"漂亮一件","type":"语序问题","suggestion":"一件漂亮","explanation":"量词'一件'应该放在形容词'漂亮'之前"}]
+输出：[{"text":"漂亮一件","type":"语序问题","suggestion":"一件漂亮","explanation":"量词'一件'应该放在形容词'漂亮'之前","explanationEn":"The measure word '一件' should be placed before the adjective '漂亮'"}]
 
 【示例17 - 语序问题：状语位置错误】
 输入："他工作在北京。"
-输出：[{"text":"工作在北京","type":"语序问题","suggestion":"在北京工作","explanation":"地点状语'在北京'应该放在动词'工作'之前"}]
+输出：[{"text":"工作在北京","type":"语序问题","suggestion":"在北京工作","explanation":"地点状语'在北京'应该放在动词'工作'之前","explanationEn":"The location phrase '在北京' should be placed before the verb '工作'"}]
 
 【示例18 - 语法问题：量词使用错误】
 输入："我买了三张苹果。"
-输出：[{"text":"三张苹果","type":"语法问题","suggestion":"三个苹果","explanation":"苹果应该用量词'个'，不能用'张'"}]
+输出：[{"text":"三张苹果","type":"语法问题","suggestion":"三个苹果","explanation":"苹果应该用量词'个'，不能用'张'","explanationEn":"Apples should use the measure word '个', not '张'"}]
 
 【示例19 - 语法问题：时态标记错误】
 输入："我明天去了北京。"
-输出：[{"text":"去了","type":"语法问题","suggestion":"去","explanation":"'明天'是将来时间，不能用完成态'了'"}]
+输出：[{"text":"去了","type":"语法问题","suggestion":"去","explanation":"'明天'是将来时间，不能用完成态'了'","explanationEn":"'明天' indicates future time, cannot use the completed aspect marker '了'"}]
 
 ## 现在检查以下文本的所有错误：
 文本：${text}
@@ -261,7 +281,15 @@ async function detectErrors(text) {
 3. 找出所有语法错误
 4. 找出所有语序错误
 5. 如果有多个错误，必须全部返回
-6. 每个错误都要给出基于上下文的解释
+6. 每个错误都要给出基于上下文的中文解释(explanation)和英文解释(explanationEn)
+
+## JSON格式要求：
+每个错误对象必须包含：
+- text: 错误的文本
+- type: 错误类型（字词错误/标点误用/语序问题/语法问题）
+- suggestion: 建议的修改
+- explanation: 中文解释
+- explanationEn: English explanation
 
 请只返回纯JSON数组，不要任何额外说明：`;
 
@@ -289,7 +317,23 @@ async function detectErrors(text) {
       const errors = JSON.parse(cleanResponse);
       console.log("✅ Parsed errors:", errors);
       
-      return Array.isArray(errors) ? errors : [];
+      // Add bilingual type and explanation to each error
+      const enrichedErrors = errors.map(error => {
+        const typeTranslation = ERROR_TYPE_TRANSLATIONS[error.type] || {
+          en: error.type,
+          zh: error.type
+        };
+        
+        return {
+          ...error,
+          typeEn: typeTranslation.en,
+          typeZh: typeTranslation.zh,
+          explanationZh: error.explanation || error.explanationZh || '', // Chinese explanation
+          explanationEn: error.explanationEn || error.explanation || '' // English explanation (fallback to Chinese if not provided)
+        };
+      });
+      
+      return Array.isArray(enrichedErrors) ? enrichedErrors : [];
     } catch (parseError) {
       console.warn("⚠️ Could not parse error detection response:", parseError);
       console.warn("Raw response was:", response);

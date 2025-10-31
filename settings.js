@@ -2,6 +2,7 @@
 const DEFAULT_MODEL = 'local';
 const DEFAULT_LIST_MODE = 'blocklist';
 const DEFAULT_ICON_VISIBLE = true;
+const DEFAULT_ERROR_LANGUAGE = 'en';
 
 // Load saved settings when page opens
 document.addEventListener('DOMContentLoaded', async () => {
@@ -11,7 +12,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     'anthropicApiKey',
     'listMode',
     'urlPatterns',
-    'bridge_icon_visible'
+    'bridge_icon_visible',
+    'error_language'
   ]);
 
   const selectedModel = result.selectedModel || DEFAULT_MODEL;
@@ -19,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const listMode = result.listMode || DEFAULT_LIST_MODE;
   const urlPatterns = result.urlPatterns || [];
   const iconVisible = result.bridge_icon_visible !== undefined ? result.bridge_icon_visible : DEFAULT_ICON_VISIBLE;
+  const errorLanguage = result.error_language || DEFAULT_ERROR_LANGUAGE;
 
   // Set the radio button
   const radioButton = document.getElementById(`model-${selectedModel}`);
@@ -41,6 +44,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   const iconVisibilityRadio = document.getElementById(iconVisible ? 'icon-visible' : 'icon-hidden');
   if (iconVisibilityRadio) {
     iconVisibilityRadio.checked = true;
+    updateRadioStyles();
+  }
+
+  // Set error language
+  const errorLanguageRadio = document.getElementById(`lang-${errorLanguage}`);
+  if (errorLanguageRadio) {
+    errorLanguageRadio.checked = true;
     updateRadioStyles();
   }
 
@@ -80,6 +90,13 @@ document.querySelectorAll('input[name="model"]').forEach(radio => {
 
 // Handle icon visibility radio button changes
 document.querySelectorAll('input[name="icon-visibility"]').forEach(radio => {
+  radio.addEventListener('change', () => {
+    updateRadioStyles();
+  });
+});
+
+// Handle error language radio button changes
+document.querySelectorAll('input[name="error-language"]').forEach(radio => {
   radio.addEventListener('change', () => {
     updateRadioStyles();
   });
@@ -207,6 +224,7 @@ document.getElementById('save-button').addEventListener('click', async () => {
   const selectedModel = document.querySelector('input[name="model"]:checked')?.value || DEFAULT_MODEL;
   const apiKey = document.getElementById('api-key').value.trim();
   const iconVisible = document.querySelector('input[name="icon-visibility"]:checked')?.value === 'true';
+  const errorLanguage = document.querySelector('input[name="error-language"]:checked')?.value || DEFAULT_ERROR_LANGUAGE;
   const statusMessage = document.getElementById('status-message');
 
   // Validate cloud model has API key
@@ -223,15 +241,23 @@ document.getElementById('save-button').addEventListener('click', async () => {
       anthropicApiKey: apiKey,
       listMode: currentListMode,
       urlPatterns: currentUrlPatterns,
-      bridge_icon_visible: iconVisible
+      bridge_icon_visible: iconVisible,
+      error_language: errorLanguage
     });
 
-    // Notify all tabs about the icon visibility change
+    // Notify all tabs about the icon visibility change and error language change
     const tabs = await chrome.tabs.query({});
     tabs.forEach(tab => {
       chrome.tabs.sendMessage(tab.id, {
         action: 'updateIconVisibility',
         visible: iconVisible
+      }).catch(() => {
+        // Ignore errors for tabs that don't have the content script
+      });
+      
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'updateErrorLanguage',
+        language: errorLanguage
       }).catch(() => {
         // Ignore errors for tabs that don't have the content script
       });

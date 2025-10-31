@@ -12,6 +12,7 @@ let activeProcessingId = null; // Track current processing session to cancel out
 let extensionEnabled = true; // Track if extension is enabled for this page
 let lastAcceptedSuggestion = null; // Store last accepted suggestion for undo
 let currentSuggestionContext = null; // Store current suggestion context (target, original, suggestion, etc.)
+let errorLanguage = 'en'; // Default to English for error explanations
 
 // Persistent bottom-right icon management
 let persistentIcon = null;
@@ -161,6 +162,15 @@ async function checkIfEnabled() {
   if (!extensionEnabled) {
     console.log('Extension disabled for this page');
     return;
+  }
+
+  // Load error language preference
+  try {
+    const result = await chrome.storage.sync.get(['error_language']);
+    errorLanguage = result.error_language || 'en';
+    console.log('Error language set to:', errorLanguage);
+  } catch (error) {
+    console.warn('Could not load error language preference:', error);
   }
 
   // Inject CSS only if enabled
@@ -401,15 +411,22 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
             '语序问题': 'bridge-error-type-word-order',
             '语法问题': 'bridge-error-type-grammar'
           }[error.type] || '';
-          errorDetailsHTML += `<span class="bridge-error-type ${errorTypeCSSClass}">${error.type}</span> `;
+          
+          // Use language preference for error type display
+          const displayType = errorLanguage === 'zh' ? (error.typeZh || error.type) : (error.typeEn || error.type);
+          errorDetailsHTML += `<span class="bridge-error-type ${errorTypeCSSClass}">${displayType}</span> `;
           errorDetailsHTML += `<span class="bridge-error-old-text">${error.text}</span>`;
           errorDetailsHTML += ` → `;
           errorDetailsHTML += `<span class="bridge-error-new-text">${error.suggestion}</span>`;
           errorDetailsHTML += `</div>`;
-          // Add explanation text if available
-          if (error.explanation) {
+          // Add explanation text if available (use language preference)
+          const displayExplanation = errorLanguage === 'zh' ? 
+            (error.explanationZh || error.explanation) : 
+            (error.explanationEn || error.explanation);
+          
+          if (displayExplanation) {
             errorDetailsHTML += `<div style="font-size: 11px; color: #666; margin-top: 2px; padding-left: 8px;">`;
-            errorDetailsHTML += error.explanation;
+            errorDetailsHTML += displayExplanation;
             errorDetailsHTML += `</div>`;
           }
         }
@@ -418,8 +435,9 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
     }
 
     // Add overall suggestion with better styling
+    const suggestionLabel = errorLanguage === 'zh' ? '建议：' : 'Suggestion: ';
     errorDetailsHTML += '<div style="color: #1a73e8; font-weight: 500; margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0;">';
-    errorDetailsHTML += '建议：' + suggestion;
+    errorDetailsHTML += suggestionLabel + suggestion;
     errorDetailsHTML += '</div>';
 
     suggestionEl.innerHTML = errorDetailsHTML;
@@ -427,12 +445,8 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
     suggestionEl.textContent = suggestion;
   }
 
-  // Include semantic difference in the original text display if available
-  if (semanticDifference > 0) {
-    originalEl.textContent = `Original: ${originalText} (Difference: ${(semanticDifference * 100).toFixed(0)}%)`;
-  } else {
-    originalEl.textContent = `Original: ${originalText}`;
-  }
+  // Hide the original text line (keep semantic difference calculation in background)
+  originalEl.style.display = 'none';
 
   // Store current suggestion context for Tab key
   currentSuggestionContext = {
@@ -1171,6 +1185,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (persistentIcon) {
       persistentIcon.style.display = request.visible ? 'flex' : 'none';
     }
+    sendResponse({ success: true });
+    return;
+  }
+
+  // Handle error language updates from settings page
+  if (request.action === 'updateErrorLanguage') {
+    errorLanguage = request.language;
+    console.log('Error language updated to:', errorLanguage);
     sendResponse({ success: true });
     return;
   }
