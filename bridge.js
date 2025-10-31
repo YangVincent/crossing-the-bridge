@@ -1319,46 +1319,28 @@ async function handleSummarize() {
 
     console.log(`📊 Summarizing ${textToSummarize.length} characters at HSK ${hskLevel} level`);
 
-    // Check if Summarizer API is available (new API from Chrome 138+)
+    // Check if Summarizer API is available (Chrome 138+)
     console.log('🔍 Checking Summarizer API availability...', { 
-      hasSummarizer: 'Summarizer' in self,
-      hasWindowAI: !!window.ai,
-      hasSelfAI: !!self.ai
+      hasSummarizer: typeof Summarizer !== 'undefined'
     });
     
-    let summary;
-    let usedFallback = false;
+    // Use direct Summarizer API (no window.ai or self.ai namespace)
+    if (typeof Summarizer === 'undefined') {
+      throw new Error('Summarizer API not found. Please update to Chrome 138+ and enable "Summarization API for Gemini Nano" in chrome://flags');
+    }
+
+    const availability = await Summarizer.availability();
+    console.log('Summarizer availability:', availability);
     
-    // Try new Summarizer API first (Chrome 138+)
-    if ('Summarizer' in self) {
-      try {
-        const availability = await self.Summarizer.availability();
-        console.log('Summarizer availability:', availability);
-        
-        if (availability === 'readily') {
-          summary = await getSummary(textToSummarize, hskLevel);
-        } else if (availability === 'after-download') {
-          loadingText.textContent = 'Downloading AI model... This may take a moment.';
-          summary = await getSummary(textToSummarize, hskLevel);
-        } else {
-          // availability === 'no' - Summarizer API exists but is not enabled in flags
-          console.warn('⚠️ Summarizer API is not enabled. Please enable "Summarization API for Gemini Nano" in chrome://flags');
-          throw new Error('SUMMARIZER_NOT_ENABLED: Summarization API is disabled in chrome://flags. Please enable "Summarization API for Gemini Nano" and restart Chrome.');
-        }
-      } catch (summarizerError) {
-        console.warn('Summarizer API failed, trying Language Model fallback:', summarizerError);
-        usedFallback = true;
-      }
-    } else {
-      console.warn('Summarizer API not found, using Language Model fallback');
-      usedFallback = true;
+    if (availability === 'no') {
+      throw new Error('SUMMARIZER_NOT_ENABLED: Summarization API is disabled in chrome://flags. Please enable "Summarization API for Gemini Nano" and restart Chrome.');
     }
     
-    // Fallback to Language Model if Summarizer failed or not available
-    if (usedFallback) {
-      loadingText.textContent = 'Using Language Model fallback...';
-      summary = await getSummaryWithLanguageModel(textToSummarize, hskLevel);
+    if (availability === 'after-download') {
+      loadingText.textContent = 'Downloading AI model... This may take a moment.';
     }
+    
+    const summary = await getSummary(textToSummarize, hskLevel);
 
     // Display result
     loading.classList.remove('visible');
@@ -1366,16 +1348,14 @@ async function handleSummarize() {
     summaryPanel.querySelector('#bridge-result-text').textContent = summary;
     summaryPanel.querySelector('#bridge-result-badge').textContent = `HSK ${hskLevel}`;
 
-    console.log('✅ Summary generated successfully' + (usedFallback ? ' (using fallback)' : ''));
+    console.log('✅ Summary generated successfully');
 
   } catch (error) {
     console.error('❌ Summarization error:', error);
     console.error('Error details:', {
       message: error.message,
       stack: error.stack,
-      hasSummarizer: 'Summarizer' in self,
-      hasWindowAI: !!window.ai,
-      hasSelfAI: !!self.ai
+      hasSummarizer: typeof Summarizer !== 'undefined'
     });
     loading.classList.remove('visible');
     
@@ -1384,13 +1364,11 @@ async function handleSummarize() {
     if (error.message.includes('No Chinese text')) {
       errorMessage = error.message;
     } else if (error.message.includes('SUMMARIZER_NOT_ENABLED')) {
-      errorMessage = `⚠️ Summarization API is disabled in Chrome flags\n\nFIX:\n1. Open chrome://flags in a new tab\n2. Search for "Summarization API"\n3. Enable "Summarization API for Gemini Nano"\n4. Click "Relaunch" button at the bottom\n5. Try again after restart\n\nNote: You can see this in chrome://on-device-internals\n(Summarize shows "Recently Used: false" and version 0)`;
-    } else if (error.message.includes('Language Model failed') || error.message.includes('Language Model API not available')) {
-      errorMessage = `Both Summarizer and Language Model APIs failed.\n\nDetails: ${error.message}\n\nPlease:\n1. Use Chrome 138+ (for Summarizer) or Chrome 127+ (for Language Model)\n2. Enable in chrome://flags:\n   • Summarization API for Gemini Nano\n   • Prompt API for Gemini Nano\n3. Restart Chrome\n4. Check chrome://on-device-internals for model status`;
-    } else if (!('Summarizer' in self)) {
-      errorMessage = `Summarizer API not found.\n\nYou need Chrome 138+ for the new Summarizer API.\n\nCurrent workaround: Enable the Language Model fallback:\n1. Open chrome://flags\n2. Enable "Prompt API for Gemini Nano"\n3. Restart Chrome\n\nOr update to Chrome 138+.`;
+      errorMessage = `⚠️ Summarization API is disabled in Chrome flags\n\nFIX:\n1. Open chrome://flags in a new tab\n2. Search for "Summarization API"\n3. Enable "Summarization API for Gemini Nano"\n4. Click "Relaunch" button at the bottom\n5. Try again after restart\n\nNote: Check status at chrome://on-device-internals`;
+    } else if (typeof Summarizer === 'undefined') {
+      errorMessage = `Summarizer API not found.\n\nYou need Chrome 138+ with the Summarizer API.\n\nSteps:\n1. Update Chrome to version 138+\n2. Open chrome://flags\n3. Enable "Summarization API for Gemini Nano"\n4. Restart Chrome\n5. Check chrome://on-device-internals for model status`;
     } else {
-      errorMessage = `AI features not available.\n\nError: ${error.message}\n\nPlease:\n1. Update to Chrome 138+ (current stable)\n2. Enable in chrome://flags:\n   • Summarization API for Gemini Nano\n   • Prompt API for Gemini Nano\n3. Restart Chrome\n4. Check chrome://on-device-internals`;
+      errorMessage = `Summarization failed.\n\nError: ${error.message}\n\nPlease:\n1. Update to Chrome 138+\n2. Enable "Summarization API for Gemini Nano" in chrome://flags\n3. Restart Chrome\n4. Check model status at chrome://on-device-internals`;
     }
     
     status.textContent = errorMessage;
@@ -1415,8 +1393,8 @@ function extractChineseFromPage() {
 }
 
 async function getSummary(text, hskLevel) {
-  // Use new Summarizer API (Chrome 138+)
-  if (!('Summarizer' in self)) {
+  // Use direct Summarizer API (Chrome 138+)
+  if (typeof Summarizer === 'undefined') {
     console.warn('Summarizer API not available');
     throw new Error('Summarizer not available');
   }
@@ -1431,21 +1409,13 @@ async function getSummary(text, hskLevel) {
   };
 
   try {
-    // Check summarizer availability
-    const availability = await self.Summarizer.availability();
-    console.log('Summarizer availability:', availability);
-
-    if (availability === 'no') {
-      throw new Error('Summarizer API is not available on this device');
-    }
-
-    // Determine summary length based on HSK level
+    // Determine summary type and format based on HSK level
     // Lower HSK levels should have shorter, simpler summaries
     const summaryTypes = {
       1: 'key-points',  // Most concise for beginners
       2: 'key-points',
-      3: 'tl;dr',       // Medium length
-      4: 'tl;dr',
+      3: 'teaser',      // Medium length (note: 'tl;dr' is not a valid type)
+      4: 'teaser',
       5: 'teaser',      // Longer for advanced
       6: 'teaser'
     };
@@ -1459,24 +1429,35 @@ async function getSummary(text, hskLevel) {
       6: 'markdown'     // Advanced users can handle markdown
     };
 
-    // Create summarizer with options using new API
-    const summarizer = await self.Summarizer.create({
-      type: summaryTypes[hskLevel] || 'tl;dr',
-      format: summaryFormats[hskLevel] || 'plain-text',
+    // Detect language of the input text
+    const detectLanguage = (content) => {
+      if (/\p{Script=Han}/u.test(content)) return "zh";
+      if (/\p{Script=Hiragana}|\p{Script=Katakana}/u.test(content)) return "ja";
+      if (/[áéíóúñü¿¡]/i.test(content)) return "es";
+      return "en";
+    };
+
+    const summaryLanguage = detectLanguage(text);
+
+    // Create summarizer with HSK-level adapted options
+    const summarizer = await Summarizer.create({
+      type: summaryTypes[hskLevel] || "teaser",
+      format: summaryFormats[hskLevel] || "plain-text",
       length: hskLevel <= 2 ? 'short' : hskLevel <= 4 ? 'medium' : 'long',
-      sharedContext: `Use only ${hskDescriptions[hskLevel]} vocabulary. Keep sentences simple and clear for Chinese language learners.`,
+      sharedContext: `Use only ${hskDescriptions[hskLevel]} vocabulary. Keep sentences simple and clear for Chinese language learners at HSK level ${hskLevel}.`,
       monitor(m) {
         m.addEventListener('downloadprogress', (e) => {
-          console.log(`Downloaded ${e.loaded * 100}%`);
+          try {
+            const pct = typeof e.loaded === 'number' ? Math.round(e.loaded * 100) : e.loaded;
+            console.log(`Downloaded ${pct}%`);
+          } catch {}
         });
       }
     });
 
-    // Generate summary
-    console.log(`Generating ${summaryTypes[hskLevel]} summary for HSK ${hskLevel}...`);
-    const summary = await summarizer.summarize(text);
-    
-    console.log('Summary generated:', summary);
+    // Generate summary with appropriate output language
+    console.log(`Generating ${summaryTypes[hskLevel]} summary for HSK ${hskLevel} with output language ${summaryLanguage}...`);
+    const summary = await summarizer.summarize(text, { outputLanguage: [summaryLanguage] });
 
     // Clean up
     summarizer.destroy();
@@ -1486,77 +1467,6 @@ async function getSummary(text, hskLevel) {
   } catch (error) {
     console.error('Summarizer API error:', error);
     throw error; // Re-throw to be caught by handleSummarize
-  }
-}
-
-// Fallback function using Language Model API
-async function getSummaryWithLanguageModel(text, hskLevel) {
-  // Try both window.ai and self.ai (Chrome 138+ uses self.ai)
-  console.log('🔍 Checking AI API locations...', {
-    'window.ai exists': !!window.ai,
-    'self.ai exists': !!self.ai,
-    'window.ai.languageModel': !!(window.ai && window.ai.languageModel),
-    'self.ai.languageModel': !!(self.ai && self.ai.languageModel),
-    'window.ai keys': window.ai ? Object.keys(window.ai) : 'N/A',
-    'self.ai keys': self.ai ? Object.keys(self.ai) : 'N/A'
-  });
-  
-  const aiAPI = self.ai || window.ai;
-  
-  console.log('Attempting Language Model fallback...', {
-    selectedAPI: aiAPI === self.ai ? 'self.ai' : 'window.ai',
-    hasLanguageModel: !!(aiAPI && aiAPI.languageModel),
-    apiKeys: aiAPI ? Object.keys(aiAPI) : 'N/A'
-  });
-  
-  if (!aiAPI) {
-    throw new Error('AI API not found. Neither window.ai nor self.ai is available. Please ensure Chrome 127+ is installed and "Prompt API for Gemini Nano" is enabled in chrome://flags/#prompt-api-for-gemini-nano, then restart Chrome');
-  }
-  
-  if (!aiAPI.languageModel) {
-    throw new Error(`Language Model API not available. Found ${aiAPI === self.ai ? 'self.ai' : 'window.ai'} but languageModel property is missing. Available properties: ${Object.keys(aiAPI).join(', ')}. Please enable "Prompt API for Gemini Nano" in chrome://flags/#prompt-api-for-gemini-nano and restart Chrome`);
-  }
-
-  const hskDescriptions = {
-    1: 'HSK 1 (150个基础词汇)',
-    2: 'HSK 2 (300个词汇)',
-    3: 'HSK 3 (600个词汇)',
-    4: 'HSK 4 (1200个词汇)',
-    5: 'HSK 5 (2500个词汇)',
-    6: 'HSK 6 (5000+个词汇)'
-  };
-
-  try {
-    // Check if language model is available
-    let capabilities;
-    try {
-      capabilities = await aiAPI.languageModel.capabilities();
-      console.log('Language Model capabilities:', capabilities);
-    } catch (capError) {
-      console.error('Error checking Language Model capabilities:', capError);
-      // If capabilities() fails, try to create session directly
-      capabilities = { available: 'readily' };
-    }
-    
-    if (capabilities.available === 'no') {
-      throw new Error('Language Model not available on this device');
-    }
-    
-    console.log('Creating Language Model session...');
-    const session = await aiAPI.languageModel.create({
-      systemPrompt: `You are a Chinese language tutor. Summarize texts using only ${hskDescriptions[hskLevel]} vocabulary appropriate for that HSK level.`
-    });
-    console.log('Language Model session created successfully');
-
-    const prompt = `Summarize this Chinese text using simple ${hskDescriptions[hskLevel]} vocabulary. Keep it concise and use short sentences:\n\n${text}\n\nSummary:`;
-    
-    const summary = await session.prompt(prompt);
-    session.destroy();
-
-    return summary.trim();
-  } catch (error) {
-    console.error('Language Model error:', error);
-    throw new Error(`Language Model failed: ${error.message}`);
   }
 }
 
