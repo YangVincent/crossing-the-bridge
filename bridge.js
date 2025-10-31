@@ -394,8 +394,14 @@ function showPopup(target, originalText, suggestion, textWidth, textLeft, indica
       errors.forEach(error => {
         if (error.suggestion) {
           errorDetailsHTML += `<div class="bridge-error-correction-item">`;
-          // Add error type label in gray before each error
-          errorDetailsHTML += `<span class="bridge-error-type">${error.type}</span> `;
+          // Add colored error type label before each error
+          const errorTypeCSSClass = {
+            '字词错误': 'bridge-error-type-word',
+            '标点误用': 'bridge-error-type-punctuation',
+            '语序问题': 'bridge-error-type-word-order',
+            '语法问题': 'bridge-error-type-grammar'
+          }[error.type] || '';
+          errorDetailsHTML += `<span class="bridge-error-type ${errorTypeCSSClass}">${error.type}</span> `;
           errorDetailsHTML += `<span class="bridge-error-old-text">${error.text}</span>`;
           errorDetailsHTML += ` → `;
           errorDetailsHTML += `<span class="bridge-error-new-text">${error.suggestion}</span>`;
@@ -516,8 +522,24 @@ function createOverlayForContentEditable(target, originalText, suggestion, seman
   console.log(`Creating overlay - Semantic difference: ${semanticDifference}`);
   console.log(`Errors detected:`, errors);
 
-  // Determine underline style based on whether errors exist
-  const underlineClass = (errors && errors.length > 0) ? 'bridge-error-underline' : 'bridge-suggestion-underline';
+  // Determine underline style and color based on error type
+  let underlineClass = 'bridge-suggestion-underline'; // Default blue for suggestions
+  
+  if (errors && errors.length > 0) {
+    // Map Chinese error types to CSS classes
+    const errorTypeMap = {
+      '字词错误': 'bridge-error-word',           // Red
+      '标点误用': 'bridge-error-punctuation',    // Orange
+      '语序问题': 'bridge-error-word-order',     // Purple
+      '语法问题': 'bridge-error-grammar'         // Blue
+    };
+    
+    // Use the first error's type to determine the color
+    const firstErrorType = errors[0].type;
+    underlineClass = errorTypeMap[firstErrorType] || 'bridge-error-underline';
+    
+    console.log(`Using underline class: ${underlineClass} for error type: ${firstErrorType}`);
+  }
 
   // Calculate the width of the actual text
   const measureText = (text, element) => {
@@ -612,8 +634,21 @@ function createOverlayForContentEditable(target, originalText, suggestion, seman
   indicator.style.top = `${rect.bottom - 5}px`;
   indicator.style.width = '0px'; // Start with 0 width for animation
   indicator.style.height = '3px'; // Thinner underline
-  // Use red for errors, blue for suggestions
-  indicator.style.backgroundColor = (errors && errors.length > 0) ? '#dc3545' : '#1a73e8';
+  
+  // Set background color based on error type
+  let indicatorColor = '#1a73e8'; // Default blue for suggestions
+  if (errors && errors.length > 0) {
+    const errorColorMap = {
+      '字词错误': '#dc3545',     // Red
+      '标点误用': '#ff9800',     // Orange
+      '语序问题': '#9c27b0',     // Purple
+      '语法问题': '#2196f3'      // Blue
+    };
+    const firstErrorType = errors[0].type;
+    indicatorColor = errorColorMap[firstErrorType] || '#dc3545';
+  }
+  indicator.style.backgroundColor = indicatorColor;
+  
   indicator.style.cursor = 'pointer';
   indicator.style.zIndex = '999999';
   indicator.style.pointerEvents = 'auto';

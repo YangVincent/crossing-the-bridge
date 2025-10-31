@@ -128,10 +128,10 @@
 ```
 
 错误类型选项：
-- `字词错误`
-- `标点误用`
-- `语法问题`
-- `语序问题`
+- `字词错误` - 🔴 红色波浪线 (Word errors - Red wavy underline)
+- `标点误用` - 🟠 橙色波浪线 (Punctuation errors - Orange wavy underline)
+- `语序问题` - 🟣 紫色波浪线 (Word order problems - Purple wavy underline)
+- `语法问题` - 🔵 蓝色波浪线 (Grammar problems - Blue wavy underline)
 
 ## 当前已知限制
 
