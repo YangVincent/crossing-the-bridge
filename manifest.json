@@ -29,6 +29,9 @@
     "sidePanel",
     "scripting"
   ],
+  "host_permissions": [
+    "*://*.youtube.com/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -37,6 +40,17 @@
       "matches": ["<all_urls>"],
       "js": ["bridge.js"],
       "css": ["overlay.css"]
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["youtube-content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["youtube-main-world.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
   "web_accessible_resources": [

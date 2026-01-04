@@ -697,4 +697,446 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return true; // Keep the message channel open for async response
   }
+
+  // --- YouTube Transcript Features ---
+
+  // Check if Chinese subtitles are available for a YouTube video
+  if (request.action === 'checkChineseSubtitles') {
+    checkChineseSubtitlesAvailable(request.videoId)
+      .then(result => sendResponse(result))
+      .catch(err => sendResponse({ available: false, error: err.message }));
+    return true;
+  }
+
+  // Fetch YouTube transcript
+  if (request.action === 'fetchYoutubeTranscript') {
+    console.log('Background: Received fetchYoutubeTranscript for', request.videoId);
+    fetchYoutubeTranscript(request.videoId)
+      .then(result => {
+        console.log('Background: Sending transcript, length:', result.transcript?.length);
+        sendResponse({ success: true, ...result });
+      })
+      .catch(err => {
+        console.error('Background: Transcript fetch error:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+    return true;
+  }
+
+  // Forward time updates to the side panel
+  if (request.action === 'youtubeTimeUpdate') {
+    // Broadcast to all extension pages (side panel will receive this)
+    chrome.runtime.sendMessage({
+      action: 'youtubeTimeUpdateForPanel',
+      videoId: request.videoId,
+      currentTime: request.currentTime
+    }).catch(() => {});
+    return false;
+  }
+
+  // Handle video changed notification
+  if (request.action === 'youtubeVideoChanged') {
+    chrome.runtime.sendMessage({
+      action: 'youtubeVideoChangedForPanel',
+      videoId: request.videoId
+    }).catch(() => {});
+    return false;
+  }
+
+  // Seek YouTube video (forward to content script)
+  if (request.action === 'seekYoutubeVideoFromPanel') {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'seekYoutubeVideo',
+          time: request.time
+        }).then(response => sendResponse(response))
+          .catch(err => sendResponse({ success: false, error: err.message }));
+      }
+    });
+    return true;
+  }
+});
+
+// --- YouTube Transcript Fetching Logic ---
+
+// Cache for transcript data
+const transcriptCache = new Map();
+
+// Check if Chinese subtitles are available
+async function checkChineseSubtitlesAvailable(videoId) {
+  try {
+    const captionTracks = await getCaptionTracks(videoId);
+    const chineseTrack = findChineseTrack(captionTracks);
+    return {
+      available: !!chineseTrack,
+      track: chineseTrack
+    };
+  } catch (error) {
+    console.error('Error checking Chinese subtitles:', error);
+    return { available: false, error: error.message };
+  }
+}
+
+// Get caption tracks from YouTube video
+async function getCaptionTracks(videoId) {
+  // Check cache first
+  const cacheKey = `tracks_${videoId}`;
+  if (transcriptCache.has(cacheKey)) {
+    return transcriptCache.get(cacheKey);
+  }
+
+  console.log('Fetching caption tracks for video:', videoId);
+
+  // Fetch video page
+  const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch video page: ${response.status}`);
+  }
+
+  const html = await response.text();
+  console.log('Fetched page length:', html.length);
+
+  // Extract ytInitialPlayerResponse - need to find the complete JSON object
+  const startMarker = 'ytInitialPlayerResponse = ';
+  const startIndex = html.indexOf(startMarker);
+
+  if (startIndex === -1) {
+    console.error('Could not find ytInitialPlayerResponse marker');
+    throw new Error('Could not find player response in page');
+  }
+
+  // Find the end of the JSON object by counting braces
+  let braceCount = 0;
+  let endIndex = startIndex + startMarker.length;
+  let inString = false;
+  let escapeNext = false;
+
+  for (let i = endIndex; i < html.length; i++) {
+    const char = html[i];
+
+    if (escapeNext) {
+      escapeNext = false;
+      continue;
+    }
+
+    if (char === '\\' && inString) {
+      escapeNext = true;
+      continue;
+    }
+
+    if (char === '"' && !escapeNext) {
+      inString = !inString;
+      continue;
+    }
+
+    if (!inString) {
+      if (char === '{') braceCount++;
+      if (char === '}') {
+        braceCount--;
+        if (braceCount === 0) {
+          endIndex = i + 1;
+          break;
+        }
+      }
+    }
+  }
+
+  const jsonStr = html.substring(startIndex + startMarker.length, endIndex);
+  console.log('Extracted JSON length:', jsonStr.length);
+
+  let playerResponse;
+  try {
+    playerResponse = JSON.parse(jsonStr);
+  } catch (e) {
+    console.error('Failed to parse player response:', e);
+    throw new Error('Failed to parse player response');
+  }
+
+  // Get caption tracks
+  const captions = playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+  console.log('Found caption tracks:', captions?.length || 0);
+
+  if (!captions || captions.length === 0) {
+    // Log available keys for debugging
+    console.log('playerResponse.captions:', playerResponse?.captions);
+    throw new Error('No captions available for this video');
+  }
+
+  // Log available languages
+  console.log('Available languages:', captions.map(c => c.languageCode));
+
+  // Cache the tracks
+  transcriptCache.set(cacheKey, captions);
+
+  return captions;
+}
+
+// Find Chinese caption track
+function findChineseTrack(captionTracks) {
+  if (!captionTracks) return null;
+
+  // Priority order for Chinese variants
+  const chineseCodes = ['zh-Hans', 'zh-CN', 'zh', 'zh-Hant', 'zh-TW', 'zh-HK'];
+
+  for (const code of chineseCodes) {
+    const track = captionTracks.find(t =>
+      t.languageCode === code ||
+      t.languageCode.startsWith(code + '-')
+    );
+    if (track) return track;
+  }
+
+  // Also check for tracks with Chinese in the name
+  const chineseNameTrack = captionTracks.find(t =>
+    t.name?.simpleText?.includes('中文') ||
+    t.name?.simpleText?.includes('Chinese')
+  );
+
+  return chineseNameTrack || null;
+}
+
+// Fetch and parse YouTube transcript
+async function fetchYoutubeTranscript(videoId) {
+  // Check cache
+  const cacheKey = `transcript_${videoId}`;
+  if (transcriptCache.has(cacheKey)) {
+    return transcriptCache.get(cacheKey);
+  }
+
+  // Get caption tracks
+  const captionTracks = await getCaptionTracks(videoId);
+  console.log('All caption tracks:', JSON.stringify(captionTracks.map(t => ({
+    lang: t.languageCode,
+    name: t.name?.simpleText,
+    kind: t.kind
+  }))));
+
+  let selectedTrack = findChineseTrack(captionTracks);
+
+  // Fallback to first available track for debugging
+  if (!selectedTrack && captionTracks.length > 0) {
+    console.log('No Chinese track found, using first available track');
+    selectedTrack = captionTracks[0];
+  }
+
+  if (!selectedTrack) {
+    throw new Error('No captions available');
+  }
+
+  console.log('Using track:', selectedTrack.languageCode, selectedTrack.name?.simpleText);
+  console.log('Track baseUrl:', selectedTrack.baseUrl);
+
+  // Fetch transcript XML
+  let transcriptUrl = selectedTrack.baseUrl;
+
+  if (!transcriptUrl) {
+    console.error('No baseUrl in track:', selectedTrack);
+    throw new Error('Caption track has no URL');
+  }
+
+  // Try json3 format first, fall back to srv3
+  let transcriptUrlJson = transcriptUrl + (transcriptUrl.includes('fmt=') ? '' : '&fmt=json3');
+
+  console.log('Fetching transcript (json3) from:', transcriptUrlJson);
+  let response = await fetch(transcriptUrlJson, {
+    credentials: 'include',
+    headers: {
+      'Accept': 'application/json, text/plain, */*'
+    }
+  });
+  console.log('Transcript fetch status:', response.status);
+  console.log('Response headers:', [...response.headers.entries()]);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch transcript: ${response.status}`);
+  }
+
+  const responseText = await response.text();
+  console.log('Response length:', responseText.length);
+  console.log('Response preview:', responseText.substring(0, 500));
+
+  let transcript = [];
+
+  // Try to parse as JSON first
+  if (responseText.startsWith('{')) {
+    try {
+      const jsonData = JSON.parse(responseText);
+      console.log('Parsed as JSON, events:', jsonData.events?.length);
+      transcript = parseTranscriptJson(jsonData);
+    } catch (e) {
+      console.error('JSON parse failed:', e);
+    }
+  }
+
+  // If JSON didn't work, try XML parsing
+  if (transcript.length === 0 && responseText.includes('<text')) {
+    console.log('Trying XML parse...');
+    transcript = parseTranscriptXml(responseText);
+  }
+
+  const result = {
+    transcript,
+    language: selectedTrack.languageCode,
+    languageName: selectedTrack.name?.simpleText || 'Captions'
+  };
+
+  // Cache the result
+  transcriptCache.set(cacheKey, result);
+
+  return result;
+}
+
+// Parse transcript JSON (json3 format) to array of segments
+function parseTranscriptJson(jsonData) {
+  const segments = [];
+
+  if (!jsonData.events) {
+    console.log('No events in JSON data');
+    return segments;
+  }
+
+  for (const event of jsonData.events) {
+    // Skip events without text segments
+    if (!event.segs) continue;
+
+    const start = (event.tStartMs || 0) / 1000;
+    const duration = (event.dDurationMs || 0) / 1000;
+
+    // Combine all segments in this event
+    const text = event.segs
+      .map(seg => seg.utf8 || '')
+      .join('')
+      .trim();
+
+    if (text) {
+      segments.push({
+        text,
+        start,
+        duration,
+        end: start + duration
+      });
+    }
+  }
+
+  console.log('Parsed JSON segments:', segments.length);
+  return segments;
+}
+
+// Parse transcript XML to array of segments
+function parseTranscriptXml(xml) {
+  console.log('Parsing XML, length:', xml.length);
+  console.log('XML preview:', xml.substring(0, 500));
+
+  const segments = [];
+
+  // Match all <text> elements - handle multiline and various attribute orders
+  const textRegex = /<text[^>]*\bstart="([^"]+)"[^>]*\bdur="([^"]+)"[^>]*>([\s\S]*?)<\/text>/g;
+  let match;
+
+  while ((match = textRegex.exec(xml)) !== null) {
+    const start = parseFloat(match[1]);
+    const duration = parseFloat(match[2]);
+    let text = match[3];
+
+    // Decode HTML entities
+    text = text
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&apos;/g, "'")
+      .replace(/\n/g, ' ')
+      .trim();
+
+    if (text) {
+      segments.push({
+        text,
+        start,
+        duration,
+        end: start + duration
+      });
+    }
+  }
+
+  console.log('Parsed segments:', segments.length);
+  if (segments.length === 0 && xml.length > 0) {
+    // Try alternate regex for different XML format
+    const altRegex = /<text start="([^"]+)" dur="([^"]+)">([\s\S]*?)<\/text>/g;
+    while ((match = altRegex.exec(xml)) !== null) {
+      const start = parseFloat(match[1]);
+      const duration = parseFloat(match[2]);
+      let text = match[3]
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/\n/g, ' ')
+        .trim();
+
+      if (text) {
+        segments.push({ text, start, duration, end: start + duration });
+      }
+    }
+    console.log('Alt regex found:', segments.length);
+  }
+
+  return segments;
+}
+
+// --- Side Panel Switching Logic ---
+
+// Helper to set the appropriate panel for a tab
+async function updatePanelForTab(tabId, url) {
+  if (!url) return;
+
+  const isYoutubeWatch = url.includes('youtube.com/watch');
+  const panelPath = isYoutubeWatch ? 'youtube-panel.html' : 'sidepanel.html';
+
+  console.log(`Setting panel for tab ${tabId}: ${panelPath} (URL: ${url.substring(0, 50)}...)`);
+
+  try {
+    await chrome.sidePanel.setOptions({
+      tabId,
+      path: panelPath,
+      enabled: true
+    });
+  } catch (e) {
+    console.error('Error setting panel options:', e);
+  }
+}
+
+// Switch side panel based on tab URL
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  // Handle both 'complete' and URL changes
+  if (changeInfo.status === 'complete' || changeInfo.url) {
+    await updatePanelForTab(tabId, tab.url || changeInfo.url);
+  }
+});
+
+// Handle when tab becomes active
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  try {
+    const tab = await chrome.tabs.get(activeInfo.tabId);
+    await updatePanelForTab(activeInfo.tabId, tab.url);
+  } catch (error) {
+    console.error('Error in onActivated:', error);
+  }
+});
+
+// Initialize panels for all existing tabs on extension load
+chrome.tabs.query({}, async (tabs) => {
+  console.log('Initializing panels for', tabs.length, 'tabs');
+  for (const tab of tabs) {
+    if (tab.id && tab.url) {
+      await updatePanelForTab(tab.id, tab.url);
+    }
+  }
 });
