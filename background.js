@@ -200,6 +200,59 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
+  // d) Cloud summarization (Anthropic Claude)
+  if (request.action === 'summarizeWithCloudLLM') {
+    chrome.storage.sync.get(['anthropicApiKey'], async (result) => {
+      const apiKey = result.anthropicApiKey;
+
+      if (!apiKey) {
+        sendResponse({ success: false, error: 'API key not configured. Please set it in the extension settings.' });
+        return;
+      }
+
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-5-20250929',
+            max_tokens: 2048,
+            messages: [{
+              role: 'user',
+              content: request.chineseText
+            }]
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+          sendResponse({ success: false, error: data.error.message || JSON.stringify(data.error) });
+          return;
+        }
+
+        if (!data.content || !data.content[0] || !data.content[0].text) {
+          sendResponse({ success: false, error: 'Unexpected response format' });
+          return;
+        }
+
+        sendResponse({
+          success: true,
+          text: data.content[0].text
+        });
+
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    });
+    return true;
+  }
+
   // b) Cloud rephrasing (Anthropic Claude)
   if (request.action === 'getIdiomaticPhrasing') {
     // Get API key from storage
