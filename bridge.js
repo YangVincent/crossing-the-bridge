@@ -1450,12 +1450,6 @@ function extractChineseFromPage() {
 }
 
 async function getSummary(text, hskLevel) {
-  // Use direct Summarizer API (Chrome 138+)
-  if (typeof Summarizer === 'undefined') {
-    console.warn('Summarizer API not available');
-    throw new Error('Summarizer not available');
-  }
-
   const hskDescriptions = {
     1: 'HSK 1 (150个基础词汇)',
     2: 'HSK 2 (300个词汇)',
@@ -1464,6 +1458,111 @@ async function getSummary(text, hskLevel) {
     5: 'HSK 5 (2500个词汇)',
     6: 'HSK 6 (5000+个词汇)'
   };
+
+  // Check user's model preference
+  const settings = await chrome.storage.sync.get(['selectedModel']);
+  const selectedModel = settings.selectedModel || 'local';
+
+  console.log('Summary using model:', selectedModel);
+
+  // Cloud LLM approach with structured Chinese/Pinyin/English output
+  if (selectedModel === 'cloud') {
+    const prompt = `You are a Chinese language teacher. Summarize this text using only ${hskDescriptions[hskLevel]} vocabulary (keep it brief, about 1/4 original length).
+
+IMPORTANT: Format each sentence as THREE lines:
+Line 1: Chinese sentence
+Line 2: Pinyin (with tone marks like: Wǒ xǐhuan)
+Line 3: English translation
+
+Add one blank line between sentences.
+
+Example:
+我很高兴。
+Wǒ hěn gāoxìng.
+I am very happy.
+
+今天天气很好。
+Jīntiān tiānqì hěn hǎo.
+The weather is good today.
+
+Now summarize this text:
+
+${text}
+
+---
+YOUR SUMMARY (Chinese, Pinyin, English format):`;
+
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        { action: 'summarizeWithCloudLLM', chineseText: prompt, hskLevel: hskLevel },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          if (response && response.success) {
+            let summary = response.text;
+
+            console.log('=== RAW RESPONSE FROM LLM ===');
+            console.log(summary);
+            console.log('=== END RAW RESPONSE ===');
+
+            // Remove various markers that might appear
+            const markers = [
+              'YOUR SUMMARY (Chinese, Pinyin, English format):',
+              'Summary:',
+              'YOUR SUMMARY:',
+              '---'
+            ];
+
+            for (const marker of markers) {
+              const markerIndex = summary.lastIndexOf(marker);
+              if (markerIndex !== -1) {
+                summary = summary.substring(markerIndex + marker.length).trim();
+              }
+            }
+
+            // Remove "Now summarize this text:" and everything before it
+            const nowIndex = summary.indexOf('Now summarize this text:');
+            if (nowIndex !== -1) {
+              const afterNow = summary.substring(nowIndex);
+              const summaryStartMarkers = ['YOUR SUMMARY', '---', '\n\n'];
+              for (const marker of summaryStartMarkers) {
+                const startIdx = afterNow.indexOf(marker);
+                if (startIdx !== -1) {
+                  summary = afterNow.substring(startIdx + marker.length).trim();
+                  break;
+                }
+              }
+            }
+
+            // Remove the original text if it appears
+            const textStartIdx = summary.indexOf(text.substring(0, 100));
+            if (textStartIdx !== -1 && textStartIdx < 200) {
+              summary = summary.substring(textStartIdx + text.length).trim();
+            }
+
+            // Clean up leading/trailing quotes and whitespace
+            summary = summary.replace(/^["'"\s]+|["'"\s]+$/g, '').trim();
+
+            // Remove any remaining "---" lines
+            summary = summary.replace(/^---+\s*/gm, '').trim();
+
+            resolve(summary);
+          } else {
+            reject(new Error(response?.error || 'Failed to generate summary'));
+          }
+        }
+      );
+    });
+  }
+
+  // Local browser Summarizer API approach (Chrome 138+)
+  if (typeof Summarizer === 'undefined') {
+    console.warn('Summarizer API not available');
+    throw new Error('Summarizer not available. Try switching to Cloud model in settings.');
+  }
 
   try {
     // Determine summary type and format based on HSK level
